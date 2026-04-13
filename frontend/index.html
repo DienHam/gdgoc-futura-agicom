@@ -1,13 +1,17 @@
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AgiCom – AI-Powered E-commerce Dashboard</title>
-    <meta name="description" content="AgiCom Dashboard – Hệ thống Agentic AI hỗ trợ chủ shop quản lý." />
+    <meta name="description"
+        content="AgiCom Dashboard – Hệ thống Agentic AI hỗ trợ chủ shop quản lý giá, nội dung, chat tự động và phân tích thị trường." />
     <link rel="stylesheet" href="assets/css/main.css" />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>" />
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>" />
 </head>
+
 <body>
     <div class="toast-container" id="toastContainer"></div>
 
@@ -16,7 +20,9 @@
             <div class="scan-icon">🔍</div>
             <div class="scan-text">Đang phân tích thị trường...</div>
             <div class="scan-subtext">AI đang quét dữ liệu đối thủ và đề xuất chiến lược</div>
-            <div class="scan-progress"><div class="scan-progress-bar"></div></div>
+            <div class="scan-progress">
+                <div class="scan-progress-bar"></div>
+            </div>
         </div>
     </div>
 
@@ -24,11 +30,12 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h3 class="modal-title">Từ chối đề xuất</h3>
-                <button class="modal-close-btn" id="modalCloseBtn">✕</button>
+                <button class="modal-close-btn" id="modalCloseBtn" aria-label="Close">✕</button>
             </div>
             <div class="modal-body">
                 <label for="feedbackText">Vui lòng cho biết lý do từ chối:</label>
-                <textarea id="feedbackText" placeholder="Nhập lý do tại đây..."></textarea>
+                <textarea id="feedbackText"
+                    placeholder="Nhập lý do tại đây... (VD: Giá đề xuất quá thấp, chưa phù hợp với chi phí vận hành)"></textarea>
             </div>
             <div class="modal-footer">
                 <button class="btn-modal-cancel" id="modalCancelBtn">Hủy</button>
@@ -38,6 +45,7 @@
     </div>
 
     <div class="app-container">
+
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div class="sidebar-logo">
@@ -48,21 +56,54 @@
                     </div>
                 </div>
             </div>
+
             <nav class="sidebar-nav">
                 <div class="nav-section-label">Tổng quan</div>
-                <button class="nav-item active" data-page="dashboard"><span class="nav-item-icon">📊</span> Tổng quan</button>
-                <button class="nav-item" data-page="revenue"><span class="nav-item-icon">💰</span> Doanh thu & Chi phí</button>
-                <button class="nav-item" data-page="inventory"><span class="nav-item-icon">📦</span> Tồn kho <span class="nav-item-badge" style="background:var(--accent-amber-bg);color:var(--accent-amber);">5</span></button>
+                <button class="nav-item active" data-page="dashboard" id="nav-dashboard">
+                    <span class="nav-item-icon">📊</span>
+                    Tổng quan
+                </button>
+                <button class="nav-item" data-page="revenue" id="nav-revenue">
+                    <span class="nav-item-icon">💰</span>
+                    Doanh thu & Chi phí
+                </button>
+                <button class="nav-item" data-page="inventory" id="nav-inventory">
+                    <span class="nav-item-icon">📦</span>
+                    Tồn kho
+                    <span class="nav-item-badge"
+                        style="background:var(--accent-amber-bg);color:var(--accent-amber);">5</span>
+                </button>
 
                 <div class="nav-section-label">Phân tích</div>
-                <button class="nav-item" data-page="competitor"><span class="nav-item-icon">🎯</span> Phân tích đối thủ</button>
-                <button class="nav-item" data-page="reviews"><span class="nav-item-icon">⭐</span> Review sản phẩm <span class="nav-item-badge">12</span></button>
-                <button class="nav-item" data-page="media"><span class="nav-item-icon">📸</span> Media & Quảng cáo</button>
+                <button class="nav-item" data-page="competitor" id="nav-competitor">
+                    <span class="nav-item-icon">🎯</span>
+                    Phân tích đối thủ
+                </button>
+
+                <button class="nav-item" data-page="reviews" id="nav-reviews">
+                    <span class="nav-item-icon">⭐</span>
+                    Review sản phẩm
+                    <span class="nav-item-badge">12</span>
+                </button>
+                <button class="nav-item" data-page="media" id="nav-media">
+                    <span class="nav-item-icon">📸</span>
+                    Media & Quảng cáo
+                </button>
 
                 <div class="nav-section-label">Hỗ trợ</div>
-                <button class="nav-item" data-page="chat"><span class="nav-item-icon">💬</span> Chat AI thông minh <span class="nav-item-badge" style="background:var(--accent-emerald-bg);color:var(--accent-emerald);">Auto</span></button>
-                <button class="nav-item" data-page="settings"><span class="nav-item-icon">⚙️</span> Cài đặt & Hồ sơ</button>
+                <button class="nav-item" data-page="chat" id="nav-chat">
+                    <span class="nav-item-icon">💬</span>
+                    Chat AI thông minh
+                    <span class="nav-item-badge"
+                        style="background:var(--accent-emerald-bg);color:var(--accent-emerald);">Auto</span>
+                </button>
+
+                <button class="nav-item" data-page="settings" id="nav-settings">
+                    <span class="nav-item-icon">⚙️</span>
+                    Cài đặt & Hồ sơ
+                </button>
             </nav>
+
             <div class="sidebar-footer">
                 <div class="sidebar-user">
                     <div class="sidebar-user-avatar">SP</div>
@@ -75,11 +116,12 @@
         </aside>
 
         <main class="main-content">
+
             <header class="header">
                 <div class="header-left">
                     <div class="header-title-area">
                         <h1 id="pageTitle">Dashboard</h1>
-                        <p id="pageSubtitle">Tổng quan chiến lược AI</p>
+                        <p id="pageSubtitle">Tổng quan chiến lược AI – Cập nhật lúc 00:12, 10/04/2026</p>
                     </div>
                 </div>
                 <div class="header-right">
@@ -87,20 +129,32 @@
                         <span class="btn-scan-text">🔍 Quét thị trường</span>
                         <span class="btn-scan-loading"><span class="spinner"></span> Đang quét...</span>
                     </button>
-                    <button class="header-icon-btn" id="btnNotification">🔔<span class="notification-dot"></span></button>
+                    <button class="header-icon-btn" id="btnNotification" aria-label="Notifications">
+                        🔔
+                        <span class="notification-dot"></span>
+                    </button>
                 </div>
             </header>
 
             <div class="guidance-toolbar" id="guidanceToolbar">
                 <div class="guidance-inner">
                     <div class="guidance-icon">🧭</div>
-                    <input type="text" class="guidance-input" id="guidanceInput" placeholder='Nhập chỉ thị chiến lược...' />
+                    <input type="text" class="guidance-input" id="guidanceInput"
+                        placeholder='Nhập chỉ thị chiến lược... (VD: "Ưu tiên xả kho Galaxy A55 tuần này", "Giữ biên lợi nhuận iPhone ≥ 10%")' />
                     <button class="guidance-send-btn" id="guidanceSendBtn">Gửi cho AI ➜</button>
                 </div>
                 <div class="guidance-tags" id="guidanceTags">
-                    <button class="guidance-tag" data-cmd="Ưu tiên đẩy mạnh xả kho sản phẩm tồn lâu nhất">📦 Xả kho</button>
-                    <button class="guidance-tag" data-cmd="Tập trung giữ vững biên lợi nhuận ≥ 10% cho tất cả sản phẩm">💎 Giữ biên LN</button>
-                    <button class="guidance-tag" data-cmd="Đẩy mạnh Flash Sale cuối tuần cho Samsung">⚡ Flash Sale</button>
+                    <button class="guidance-tag" data-cmd="Ưu tiên đẩy mạnh xả kho sản phẩm tồn lâu nhất">📦 Xả
+                        kho</button>
+                    <button class="guidance-tag"
+                        data-cmd="Tập trung giữ vững biên lợi nhuận ≥ 10% cho tất cả sản phẩm">💎 Giữ biên LN</button>
+                    <button class="guidance-tag" data-cmd="Tập trung cạnh tranh giá với MobileWorld Store tuần này">🎯
+                        Đấu giá đối thủ</button>
+                    <button class="guidance-tag"
+                        data-cmd="Tối ưu SEO toàn bộ tiêu đề sản phẩm theo keyword Shopee trending">✍️ SEO toàn
+                        bộ</button>
+                    <button class="guidance-tag" data-cmd="Đẩy mạnh Flash Sale cuối tuần cho Samsung">⚡ Flash
+                        Sale</button>
                 </div>
                 <div class="guidance-active-cmd" id="guidanceActiveCmd" style="display:none;">
                     <span class="guidance-active-label">🤖 AI đang ưu tiên:</span>
@@ -109,10 +163,13 @@
                 </div>
             </div>
 
-            <div class="page-content" id="pageContent"></div>
+            <div class="page-content" id="pageContent">
+                </div>
+
         </main>
     </div>
 
     <script type="module" src="assets/js/app.js"></script>
 </body>
+
 </html>
