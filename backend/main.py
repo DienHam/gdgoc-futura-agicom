@@ -9,8 +9,13 @@ from models import (
     GuardrailResponse, StrategyProposal, ShopProfile
 )
 from prompts import CHAT_SYSTEM_PROMPT, STRATEGY_SYSTEM_PROMPT
-from services import analyze_strategy_slow_track, customer_care_fast_track
-from services import analyze_raw_data_phase1
+from services import (
+    analyze_strategy_slow_track,
+    customer_care_fast_track,
+    analyze_raw_data_phase1,
+    learn_from_human_service,
+    cskh_rag_service
+)
 
 app = FastAPI(title="Agicom Core Backend")
 
@@ -157,6 +162,31 @@ async def process_market_strategy(product: ProductRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/fast-track-chat-v2")
+async def process_chat_v2(chat: ChatMessage, profile: ShopProfile):
+    try:
+        # Chạy qua bộ não RAG
+        ai_response = await cskh_rag_service(chat.customer_text, profile.brand_tone)
+        
+        # Logic phân luồng dựa trên độ tự tin
+        if ai_response["confidence_score"] >= 0.85 and ai_response["is_safe"]:
+            action = "Auto-Reply Executed"
+        else:
+            action = "Sent to Dashboard (Human Review Required)"
+            
+        return {
+            "status": "success",
+            "routing_action": action,
+            "data": ai_response
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/learn-feedback")
+async def human_feedback(customer_q: str, human_a: str):
+    """API để chủ shop 'dạy' AI khi họ sửa câu trả lời trên Dashboard"""
+    return await learn_from_human_service(customer_q, human_a)
 
 if __name__ == "__main__":
     import uvicorn

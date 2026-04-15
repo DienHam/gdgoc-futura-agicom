@@ -2,8 +2,8 @@ import os
 import json
 from fastapi import HTTPException
 from google.genai import types
-from config import client
-from prompts import DATA_ANALYST_PROMPT
+from config import policy_col, product_col, resolved_qa_col, client
+from prompts import DATA_ANALYST_PROMPT, CHAT_RAG_PROMPT, LEARNING_EXTRACTOR_PROMPT
 from models import MarketInsight
 
 def fetch_raw_market_data(sku_id: str) -> dict:
@@ -84,3 +84,62 @@ async def customer_care_fast_track(data: dict):
             return {"track": "Fast Track", "action": "Send Proposals to Dashboard", "draft": result["reply"], "status": "Flagged / Low Confidence"}
     except:
         return {"track": "Fast Track", "status": "Error parsing JSON"}
+
+async def cskh_rag_service(customer_text: str, brand_tone: str):
+    # Tìm top 3 kết quả thay vì 1
+    policy_hits = policy_col.query(query_texts=[customer_text], n_results=3)
+    product_hits = product_col.query(query_texts=[customer_text], n_results=3)
+    
+    # Gộp tất cả các kết quả tìm được thành 1 đoạn văn bản
+    def get_all_hits(hits):
+        if hits and hits.get('documents') and len(hits['documents'][0]) > 0:
+            return "\n- ".join(hits['documents'][0]) # Nối các kết quả bằng dấu gạch đầu dòng
+        return "Không có thông tin cụ thể."
+
+    context = f"""
+    CÁC THÔNG TIN TÌM THẤY:
+    Về quy định: 
+    - {get_all_hits(policy_hits)}
+    
+    Về sản phẩm: 
+    - {get_all_hits(product_hits)}
+    """
+    
+    # Debug: In ra terminal để bạn xem AI đang được đọc những gì
+    print("--- CONTEXT AI NHẬN ĐƯỢC ---")
+    print(context)
+    print("----------------------------")
+
+    # 2. GENERATION: Gọi Gemini tạo câu trả lời
+    user_prompt = CHAT_RAG_PROMPT.format(context=context, brand_tone=brand_tone)
+    
+    response = await client.aio.models.generate_content(
+        model="gemini-flash-latest",
+        contents=[user_prompt, f"Tin nhắn khách: {customer_text}"],
+        config={"response_mime_type": "application/json"}
+    )
+    
+    result = json.loads(response.text)
+    
+    # 3. COORDINATION (Hành động của Cảm biến tiền phương)
+    if result.get("sensor_insight"):
+        print(f"[!] SENSOR ALERT: {result['sensor_insight']}")
+        # Ở đây bạn có thể gọi logic để báo cho Pricing Agent/Content Agent
+        # Ví dụ: await trigger_content_update(result['sensor_insight'])
+
+    return result
+
+async def learn_from_human_service(customer_q: str, human_a: str):
+    """Lưu cặp Q&A đã được con người duyệt vào Vector DB"""
+    # Dùng LLM để format lại cho 'sạch' trước khi lưu
+    prompt = LEARNING_EXTRACTOR_PROMPT.format(chat_log=f"Q: {customer_q}, A: {human_a}")
+    response = await client.aio.models.generate_content(model="gemini-flash-latest", contents=prompt)
+    
+    data = json.loads(response.text)
+    
+    # Lưu vào ChromaDB
+    resolved_qa_col.add(
+        documents=[f"Q: {data['question']} A: {data['answer']}"],
+        ids=[f"qa_{hash(data['question'])}"]
+    )
+    return {"status": "Learned successfully"}
