@@ -1,3 +1,4 @@
+from datetime import datetime
 import json
 from fastapi import FastAPI, HTTPException
 from google.genai import types
@@ -195,24 +196,40 @@ async def human_feedback(customer_q: str, human_a: str):
 @app.get("/daily-summary")
 async def get_daily_summary():
     db = SessionLocal()
-    # Lấy 5 insight gần nhất từ chat
-    recent_chats = db.query(ChatLog).filter(ChatLog.insight != None).order_by(ChatLog.timestamp.desc()).limit(5).all()
-    
-    # Lấy các task đang chờ xử lý
-    pending_tasks = db.query(CoordinationTask).filter(CoordinationTask.status == "pending").all()
-    
-    summary = {
-        "top_insights": [c.insight for c in recent_chats],
-        "agent_coordination": [
-            {
-                "agent": t.target_agent,
-                "task": t.instruction,
-                "product": t.product_id
-            } for t in pending_tasks
-        ]
-    }
-    db.close()
-    return summary
+    try:
+        # 1. Lấy dữ liệu và ép kiểu về list ngay lập tức để tránh lỗi sau khi đóng db
+        tasks = db.query(CoordinationTask).filter(CoordinationTask.status == "pending").all()
+        
+        # Phân loại task
+        pricing_tasks = [t.instruction for t in tasks if t.target_agent == "Pricing"]
+        content_tasks = [t.instruction for t in tasks if t.target_agent == "Content"]
+        risk_tasks = [t.instruction for t in tasks if t.target_agent == "RiskManager"]
+        
+        # 2. Lấy insight từ log chat
+        recent_logs = db.query(ChatLog).order_by(ChatLog.timestamp.desc()).limit(10).all()
+        insights = [log.insight for log in recent_logs if log.insight]
+        
+        # 3. Sửa lỗi datetime ở đây
+        current_date = datetime.now().date().isoformat()
+        
+        return {
+            "date": current_date,
+            "risk_management": {
+                "status": "Cảnh báo" if len(risk_tasks) > 0 else "An toàn",
+                "urgent_actions": risk_tasks
+            },
+            "growth_strategy": {
+                "pricing_proposals": pricing_tasks,
+                "content_optimizations": content_tasks
+            },
+            "customer_sentiment_overview": insights
+        }
+    except Exception as e:
+        # In lỗi thật sự ra Terminal để bạn debug
+        print(f"LỖI DAILY SUMMARY: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
 
 if __name__ == "__main__":
     import uvicorn

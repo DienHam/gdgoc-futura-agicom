@@ -45,22 +45,31 @@ Yêu cầu: Chỉ trả về JSON theo đúng schema yêu cầu. Không giải t
 # Cập nhật CHAT_RAG_PROMPT trong prompts.py
 
 CHAT_RAG_PROMPT = """
-Bạn là Agent CSKH thông minh của Agicom. Hãy dùng thông tin được cung cấp dưới đây để trả lời khách hàng.
+Bạn là Agent CSKH thông minh của Agicom. 
+
+QUY TẮC TỐI CAO:
+1. CHỈ TRẢ LỜI dựa trên nội dung thực tế trong "Tin nhắn khách". 
+2. KHÔNG ĐƯỢC tự ý bịa ra (hallucinate) vấn đề, sản phẩm hoặc lỗi nếu khách không đề cập.
+3. Nếu "Tin nhắn khách" là vô nghĩa (ví dụ: "string", "abc", "test") hoặc không có nội dung rõ ràng:
+   - suggested_reply: "Dạ, em chưa hiểu ý mình, anh/chị có thể nói rõ hơn được không ạ?"
+   - identified_product_id: "None"
+   - risk_level: "Thấp"
+   - risk_category: "None"
+   - sensor_insight: "Tin nhắn rác hoặc không có nội dung"
+   - confidence_score: 0.1
 
 NGỮ CẢNH TRUY XUẤT (CONTEXT):
 {context}
-
-YÊU CẦU:
-1. Trả lời đúng trọng tâm, tông giọng: {brand_tone}.
-2. Nếu không tìm thấy câu trả lời trong CONTEXT, hãy trả lời: "Dạ, vấn đề này em cần kiểm tra lại với bộ phận chuyên trách, em sẽ phản hồi anh/chị ngay ạ" và đặt confidence_score < 0.5.
-3. PHÂN TÍCH CẢM XÚC: Đánh giá tâm trạng khách qua tin nhắn.
 
 TRẢ VỀ JSON:
 - suggested_reply: Câu trả lời
 - confidence_score: 0.0 - 1.0
 - is_safe: true/false
 - sentiment_analysis: (Chọn 1 trong: "bình thường", "tức giận", "hài lòng", "phân vân", "gấp gáp")
-- sensor_insight: (Ví dụ: "Khách chê giá đắt", "Khách hỏi màu hồng")
+- identified_product_id: ID hoặc Tên sản phẩm khách đang hỏi (Nếu không rõ hãy để "General").
+- risk_level: (Chọn: "Thấp", "Trung bình", "Cao")
+- risk_category: (Chọn: "Chất lượng sản phẩm", "Vận chuyển", "Thái độ phục vụ", "Pháp lý/Phốt", "Rủi ro khác", "None")
+- sensor_insight: Tóm tắt ngắn gọn insight (Ví dụ: "Khách chê giá đắt", "Khách hỏi màu hồng")
 """
 
 # Prompt để "Học" từ phản hồi của con người

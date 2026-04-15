@@ -80,5 +80,30 @@ def seed_everything():
     db.close()
     print("[SUCCESS] Đã nạp dữ liệu Demo thành công! Bây giờ bạn có thể chạy API.")
 
+# Thêm vào seed_demo.py
+
+def seed_risk_data():
+    db = SessionLocal()
+    
+    # Giả lập một case khách dọa bóc phốt
+    bad_log = ChatLog(
+        customer_q="Sản phẩm mới mua 2 ngày đã hỏng màn hình. Shop làm ăn kiểu gì thế? Tôi sẽ lên hội bóc phốt!",
+        ai_a="Dạ shop rất tiếc về sự cố này, em đã chuyển thông tin cho quản lý để đổi mới ngay cho mình ạ.",
+        insight="Khách dọa bóc phốt do lỗi màn hình A56",
+        timestamp=datetime.datetime.now()
+    )
+    
+    risk_task = CoordinationTask(
+        target_agent="RiskManager",
+        product_id="A56",
+        instruction="NGUY CƠ KHỦNG HOẢNG (Pháp lý/Phốt): Khách dọa bóc phốt do lỗi màn hình. Cần gọi điện xin lỗi và đổi mới trong 2h!",
+        status="pending"
+    )
+    
+    db.add(bad_log)
+    db.add(risk_task)
+    db.commit()
+    db.close()
+
 if __name__ == "__main__":
     seed_everything()

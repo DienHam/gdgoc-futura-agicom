@@ -86,27 +86,42 @@ async def customer_care_fast_track(data: dict):
     except:
         return {"track": "Fast Track", "status": "Error parsing JSON"}
 
-# Cập nhật hàm cskh_rag_service trong services.py
-
 async def cskh_rag_service(customer_text: str, brand_tone: str):
-    # 1. Retrieval (Tìm kiếm context) - Giữ nguyên logic cũ của bạn
-    policy_hits = policy_col.query(query_texts=[customer_text], n_results=2)
-    product_hits = product_col.query(query_texts=[customer_text], n_results=2)
-    qa_hits = resolved_qa_col.query(query_texts=[customer_text], n_results=2)
+    # Kiểm tra nhanh đầu vào (Input Validation)
+    if len(customer_text.strip()) < 3 or customer_text.lower() in ["string", "test", "hello"]:
+        return {
+            "suggested_reply": "Dạ Agicom chào anh/chị, em có thể giúp gì được cho mình ạ?",
+            "confidence_score": 1.0,
+            "is_safe": True,
+            "sentiment_analysis": "bình thường",
+            "identified_product_id": "None",
+            "risk_level": "Thấp",
+            "risk_category": "None",
+            "sensor_insight": "Khách chào hỏi hoặc nhập tin nhắn test"
+        }
+
+    # 1. Retrieval
+    policy_hits = policy_col.query(query_texts=[customer_text], n_results=1)
+    product_hits = product_col.query(query_texts=[customer_text], n_results=1)
+    qa_hits = resolved_qa_col.query(query_texts=[customer_text], n_results=1)
     
-    def get_all_hits(hits):
+    # Một mẹo nhỏ: Chỉ lấy context nếu điểm số (distance) thấp (nghĩa là độ khớp cao)
+    # ChromaDB dùng distance, càng nhỏ càng khớp. Ví dụ: distance < 1.0
+    def get_valid_hits(hits):
         if hits and hits.get('documents') and len(hits['documents'][0]) > 0:
-            return "\n- ".join(hits['documents'][0])
+            # Nếu distance > 1.5 thường là kết quả "ép buộc", không liên quan
+            if hits.get('distances') and hits['distances'][0][0] > 1.5:
+                return "Không có thông tin liên quan."
+            return hits['documents'][0][0]
         return "Không có thông tin cụ thể."
 
     context = f"""
-    CÁC THÔNG TIN TÌM THẤY:
-    Quy định: {get_all_hits(policy_hits)}
-    Sản phẩm: {get_all_hits(product_hits)}
-    Kinh nghiệm: {get_all_hits(qa_hits)}
+    Quy định: {get_valid_hits(policy_hits)}
+    Sản phẩm: {get_valid_hits(product_hits)}
+    Kinh nghiệm: {get_valid_hits(qa_hits)}
     """
 
-    # 2. Generation (Gọi AI phân tích cảm xúc và trả lời)
+    # 2. Generation (Gemini sẽ nhận prompt đã được siết chặt quy tắc)
     user_prompt = CHAT_RAG_PROMPT.format(context=context, brand_tone=brand_tone)
     
     response = await client.aio.models.generate_content(
@@ -117,18 +132,26 @@ async def cskh_rag_service(customer_text: str, brand_tone: str):
     
     result = json.loads(response.text)
 
-    # 3. Logic Guardrail dựa trên Sentiment
+    # 3. Trích xuất các thông tin AI vừa phân tích
     sentiment = result.get("sentiment_analysis", "bình thường")
-    
-    # NÂNG CẤP: Nếu khách đang tức giận, không bao giờ cho phép Auto-Reply
-    if sentiment == "tức giận":
-        result["is_safe"] = False
-        print(f"[!] CẢNH BÁO: Phát hiện khách hàng đang tức giận!")
+    product_id = result.get("identified_product_id", "General") # AI tự xác định sản phẩm
+    risk_level = result.get("risk_level", "Thấp")
+    risk_cat = result.get("risk_category", "None")
+    insight = result.get("sensor_insight")
 
-    # 4. Coordination (Điều phối nếu có insight)
-    if result.get("sensor_insight"):
-        # Trích xuất Product ID từ ngữ cảnh (giả định đang chat về A56)
-        await coordinate_agents(result["sensor_insight"], "A56")
+    # 4. Logic Guardrail: Nếu khách tức giận, chặn Auto-Reply
+    if sentiment == "tức giận" or risk_level == "Cao":
+        result["is_safe"] = False
+        print(f"[!] CẢNH BÁO RỦI RO: Khách {sentiment}, ID sản phẩm: {product_id}")
+
+    # 5. Coordination: Điều phối dựa trên dữ liệu AI cung cấp
+    if insight and insight != "None":
+        await coordinate_agents(
+            insight_text=insight, 
+            product_id=product_id, 
+            risk_level=risk_level, 
+            risk_category=risk_cat
+        )
 
     return result
 
@@ -221,28 +244,33 @@ async def full_strategy_pipeline(sku_id: str, shop_profile: dict):
     
     return json.loads(response.text)
 
-async def coordinate_agents(insight_text: str, product_id: str):
-    """BIẾN INSIGHT THÀNH HÀNH ĐỘNG THỰC TẾ"""
+async def coordinate_agents(insight_text: str, product_id: str, risk_level: str = "Thấp", risk_category: str = "None"):
     db = SessionLocal()
     target = None
     instruction = ""
 
-    # Logic phân loại đơn giản
-    if any(word in insight_text.lower() for word in ["giá", "đắt", "rẻ"]):
-        target = "Pricing"
-        instruction = f"Khách hàng phản hồi về giá: {insight_text}. Kiểm tra lại biên lợi nhuận và giá đối thủ."
+    # Ưu tiên xử lý Rủi ro
+    if risk_level == "Cao" or risk_category in ["Chất lượng sản phẩm", "Pháp lý/Phốt"]:
+        target = "RiskManager"
+        instruction = f"BÁO ĐỘNG KHẨN CẤP ({risk_category}): {insight_text}. Kiểm tra ngay sản phẩm {product_id}!"
     
-    if any(word in insight_text.lower() for word in ["màu", "thông tin", "ảnh"]):
+    # Phân loại cho Pricing
+    elif any(word in insight_text.lower() for word in ["giá", "đắt", "rẻ", "voucher"]):
+        target = "Pricing"
+        instruction = f"Insight về giá cho sản phẩm {product_id}: {insight_text}"
+        
+    # Phân loại cho Content
+    elif any(word in insight_text.lower() for word in ["màu", "thông tin", "mô tả"]):
         target = "Content"
-        instruction = f"Khách hàng thắc mắc về nội dung: {insight_text}. Cập nhật lại mô tả sản phẩm."
+        instruction = f"Yêu cầu cập nhật nội dung cho {product_id}: {insight_text}"
 
     if target:
         new_task = CoordinationTask(
             target_agent=target,
             product_id=product_id,
-            instruction=instruction
+            instruction=instruction,
+            status="pending"
         )
         db.add(new_task)
         db.commit()
-        print(f"[*] Đã tạo Task cho {target} Agent!")
     db.close()
