@@ -1,0 +1,32 @@
+{
+    "sku_id": "A56",
+    "internal_data": {
+        "current_price": 5500000,
+        "stock_level": 150,
+        "cost_price": 4200000,
+        "min_margin_percent": 0.15,
+        "conversion_rate": 0.03
+    },
+    "competitors": [
+        {
+            "name": "Shop Mobile Pro (Mall)",
+            "price": 5100000,
+            "is_mall": true,
+            "rating": 4.9,
+            "sales_monthly": 1200
+        },
+        {
+            "name": "Giá Rẻ Mỗi Ngày",
+            "price": 4900000,
+            "is_mall": false,
+            "rating": 3.5,
+            "sales_monthly": 50
+        }
+    ],
+    "customer_reviews": [
+        "Sản phẩm dùng tốt nhưng shop bán hơi đắt hơn bên Mobile Pro.",
+        "Tại sao không có màu Đỏ nhỉ? Tôi thích màu đỏ.",
+        "Giao hàng nhanh, đóng gói cẩn thận.",
+        "Muốn mua thêm tai nghe đi kèm mà shop không bán combo."
+    ]
+}

@@ -5,6 +5,7 @@ from google.genai import types
 from config import policy_col, product_col, resolved_qa_col, client
 from prompts import DATA_ANALYST_PROMPT, CHAT_RAG_PROMPT, LEARNING_EXTRACTOR_PROMPT
 from models import MarketInsight
+from database import SessionLocal, CoordinationTask, ChatLog
 
 def fetch_raw_market_data(sku_id: str) -> dict:
     file_path = f"backend/mock_data/{sku_id}-raw.json"
@@ -204,3 +205,59 @@ async def coordinate_agents(insight_text: str, product_id: str):
     if any(word in insight_text for word in ["màu", "không có", "hỏi thêm", "thông tin"]):
         print(f"[Trigger] -> Gửi yêu cầu cho CONTENT AGENT: Cập nhật mô tả sản phẩm {product_id}")
         # Logic: Tạo một yêu cầu sửa bài đăng trên sàn
+
+async def full_strategy_pipeline(sku_id: str, shop_profile: dict):
+    """KẾT NỐI PHASE 1 & PHASE 2"""
+    
+    # 1. Chạy Phase 1: Data Analyst
+    # Giả sử hàm analyze_raw_data_phase1 đã có sẵn từ code cũ của bạn
+    phase1_result = await analyze_raw_data_phase1(sku_id)
+    insight = phase1_result["insight"]
+    internal = phase1_result["internal_data"]
+
+    # 2. Chạy Phase 2: Strategist (Sử dụng STRATEGY_SYSTEM_PROMPT)
+    # Gom tất cả dữ liệu lại để AI ra quyết định
+    combined_data = {
+        "market_insight": insight,
+        "internal_data": internal,
+        "shop_profile": shop_profile
+    }
+
+    user_prompt = f"Dữ liệu tổng hợp: {json.dumps(combined_data, ensure_ascii=False)}"
+    
+    response = await client.aio.models.generate_content(
+        model="gemini-flash-latest",
+        contents=[STRATEGY_SYSTEM_PROMPT, user_prompt],
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            # Giả sử bạn dùng StrategyProposal model đã định nghĩa ở models.py
+        )
+    )
+    
+    return json.loads(response.text)
+
+async def coordinate_agents(insight_text: str, product_id: str):
+    """BIẾN INSIGHT THÀNH HÀNH ĐỘNG THỰC TẾ"""
+    db = SessionLocal()
+    target = None
+    instruction = ""
+
+    # Logic phân loại đơn giản
+    if any(word in insight_text.lower() for word in ["giá", "đắt", "rẻ"]):
+        target = "Pricing"
+        instruction = f"Khách hàng phản hồi về giá: {insight_text}. Kiểm tra lại biên lợi nhuận và giá đối thủ."
+    
+    if any(word in insight_text.lower() for word in ["màu", "thông tin", "ảnh"]):
+        target = "Content"
+        instruction = f"Khách hàng thắc mắc về nội dung: {insight_text}. Cập nhật lại mô tả sản phẩm."
+
+    if target:
+        new_task = CoordinationTask(
+            target_agent=target,
+            product_id=product_id,
+            instruction=instruction
+        )
+        db.add(new_task)
+        db.commit()
+        print(f"[*] Đã tạo Task cho {target} Agent!")
+    db.close()

@@ -16,6 +16,9 @@ from services import (
     learn_from_human_service,
     cskh_rag_service
 )
+from database import SessionLocal, ChatLog, CoordinationTask, init_db
+
+init_db()
 
 app = FastAPI(title="Agicom Core Backend")
 
@@ -169,17 +172,18 @@ async def process_chat_v2(chat: ChatMessage, profile: ShopProfile):
         # Chạy qua bộ não RAG
         ai_response = await cskh_rag_service(chat.customer_text, profile.brand_tone)
         
-        # Logic phân luồng dựa trên độ tự tin
-        if ai_response["confidence_score"] >= 0.85 and ai_response["is_safe"]:
-            action = "Auto-Reply Executed"
-        else:
-            action = "Sent to Dashboard (Human Review Required)"
-            
-        return {
-            "status": "success",
-            "routing_action": action,
-            "data": ai_response
-        }
+        # LƯU VÀO DB ĐỂ HỌC VÀ BÁO CÁO
+        db = SessionLocal()
+        new_log = ChatLog(
+            customer_q=chat.customer_text,
+            ai_a=ai_response["suggested_reply"],
+            insight=ai_response.get("sensor_insight")
+        )
+        db.add(new_log)
+        db.commit()
+        db.close()
+        
+        return {"status": "success", "data": ai_response}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -190,24 +194,25 @@ async def human_feedback(customer_q: str, human_a: str):
 
 @app.get("/daily-summary")
 async def get_daily_summary():
-    """
-    Tổng hợp các insight mà Agent CSKH đã thu thập được trong ngày
-    để báo cáo cho chủ shop.
-    """
-    # Trong thực tế, bạn sẽ lưu các sensor_insight này vào một bảng SQL (vd: SQLite/PostgreSQL)
-    # Ở bản Demo, ta có thể giả lập hoặc lấy từ logs.
-    return {
-        "date": "2024-05-20",
-        "top_insights": [
-            "5 khách hàng hỏi màu Đỏ cho A56 (Hiện không có)",
-            "3 khách hàng chê phí ship nội thành cao",
-            "Đã điều hướng thành công 2 khách sang mẫu A57"
-        ],
-        "recommendations": [
-            "Cần bổ sung ảnh bản màu Xanh của A56 lên đầu trang",
-            "Cân nhắc chương trình Freeship cho dòng A57 để đẩy hàng"
+    db = SessionLocal()
+    # Lấy 5 insight gần nhất từ chat
+    recent_chats = db.query(ChatLog).filter(ChatLog.insight != None).order_by(ChatLog.timestamp.desc()).limit(5).all()
+    
+    # Lấy các task đang chờ xử lý
+    pending_tasks = db.query(CoordinationTask).filter(CoordinationTask.status == "pending").all()
+    
+    summary = {
+        "top_insights": [c.insight for c in recent_chats],
+        "agent_coordination": [
+            {
+                "agent": t.target_agent,
+                "task": t.instruction,
+                "product": t.product_id
+            } for t in pending_tasks
         ]
     }
+    db.close()
+    return summary
 
 if __name__ == "__main__":
     import uvicorn
