@@ -11,55 +11,59 @@ class InternalData(BaseModel):
     stock_level: int
     cost_price: float
     min_margin_percent: float
-    conversion_rate: float = 0.05  # THÊM MỚI: Mặc định là 5% (0.05)
+    conversion_rate: float = 0.05
 
 class MarketData(BaseModel):
     competitor_min_price: float
     market_trend: str
     competitor_name: str
-    competitor_rating: float = 4.5  # THÊM MỚI: Rating đối thủ
-    our_rating: float = 4.8         # THÊM MỚI: Rating của shop mình
-    platform_campaign: str = "None" # THÊM MỚI: Ví dụ "Mega Sale 4.4", "None"
+    competitor_rating: float = 4.5
+    our_rating: float = 4.8
+    platform_campaign: str = "None"
 
 class MarketInsight(BaseModel):
     competitor_min_price: float
     competitor_avg_price: float
     market_trend: str
     overall_sentiment: str
-    customer_pain_points: List[str] # Các vấn đề khách hay phàn nàn (vd: "giao lâu", "trôi bảo hành")
+    customer_pain_points: List[str]
     top_frequent_questions: List[str]
-    analyst_summary: str # Một câu tóm tắt ngắn gọn tình hình thị trường
+    analyst_summary: str
 
 class CustomerContext(BaseModel):
     recent_sentiment: str
     frequent_question: str
 
 class IncomingData(BaseModel):
-    data_type: str  # "market_data" hoặc "customer_chat"
-    payload: dict   # Chứa nội dung data
+    data_type: str
+    payload: dict
 
 class ProposalApproval(BaseModel):
     proposal_id: str
-    status: str     # "approved" hoặc "declined"
+    status: str
     feedback: str = ""
 
 class ChatMessageRequest(BaseModel):
     shop_policy: str = ""
     customer_text: str
 
+class ChatMessage(BaseModel):
+    shop_policy: str = "Đổi trả trong 7 ngày. Phí ship khách chịu."
+    customer_text: str
+
 class GuardrailResponse(BaseModel):
     suggested_reply: str
-    confidence_score: float  # Từ 0.0 đến 1.0
-    is_safe: bool            # True nếu an toàn để gửi tự động
-    flag_reason: str         # Lý do nếu bị cờ (ví dụ: Khách chửi bới, đòi giảm giá)
+    confidence_score: float
+    is_safe: bool
+    flag_reason: str
 
 class StrategyProposal(BaseModel):
-    action_required: bool            # AI decide if update is necessary
+    action_required: bool
     proposed_price: float
     expected_margin_percent: float
     pricing_reasoning: str
     content_update_suggestion: str
-    urgency_level: str  # "None", "High", "Medium", "Low"
+    urgency_level: str
 
 class ProductRequest(BaseModel):
     product_id: str
@@ -67,10 +71,22 @@ class ProductRequest(BaseModel):
     internal_data: InternalData
     market_data: MarketData
     customer_context: CustomerContext
-    shop_profile: ShopProfile        # Personalization input
+    shop_profile: ShopProfile
     manager_directive: str = "Không có chỉ thị đặc biệt"
 
 class ChatSessionInput(BaseModel):
     customer_id: str
     message: str
     brand_tone: str = "Chuyên nghiệp, nhiệt tình"
+
+class ReviewData(BaseModel):
+    product_id: str
+    rating: int          # Số sao (1-5)
+    review_text: str     # Nội dung đánh giá
+    customer_name: str = "Khách hàng Ẩn danh"
+
+class ReviewExtractedInsight(BaseModel):
+    sentiment: str       # Tiêu cực, Tích cực, Bình thường
+    key_issue: str       # Vấn đề cốt lõi (vd: "Giao hàng chậm", "Lỗi móp méo")
+    action_needed: bool  # Có cần agent khác xử lý không?
+    qa_knowledge: str    # Bài học rút ra (ví dụ: "Nếu khách hỏi về móp méo, hãy báo do vận chuyển và xin lỗi")

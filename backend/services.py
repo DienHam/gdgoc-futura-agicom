@@ -88,53 +88,119 @@ async def customer_care_fast_track(data: dict):
     except:
         return {"track": "Fast Track", "status": "Error parsing JSON"}
 
-async def cskh_rag_service(db, customer_id: str, customer_text: str, brand_tone: str):
-    # 0. Lấy lịch sử từ SQLite
-    history_data = get_chat_history(db, customer_id, limit=6)
-    history_str = "\n".join([f"{m.role}: {m.content}" for m in history_data])
+async def coordinate_agents(insight_text: str, product_id: str, risk_level: str = "Thấp", risk_category: str = "None"):
+    db = SessionLocal()
+    target = None
+    instruction = ""
 
-    # 1. Retrieval (RAG) - GIỮ NGUYÊN
+    # Ưu tiên xử lý Rủi ro
+    if risk_level == "Cao" or risk_category in ["Chất lượng sản phẩm", "Pháp lý/Phốt"]:
+        target = "RiskManager"
+        instruction = f"BÁO ĐỘNG KHẨN CẤP ({risk_category}): {insight_text}. Kiểm tra ngay sản phẩm {product_id}!"
+    
+    # Phân loại cho Pricing
+    elif any(word in insight_text.lower() for word in ["giá", "đắt", "rẻ", "voucher"]):
+        target = "Pricing"
+        instruction = f"Insight về giá cho sản phẩm {product_id}: {insight_text}"
+        
+    # Phân loại cho Content
+    elif any(word in insight_text.lower() for word in ["màu", "thông tin", "mô tả"]):
+        target = "Content"
+        instruction = f"Yêu cầu cập nhật nội dung cho {product_id}: {insight_text}"
+
+    if target:
+        new_task = CoordinationTask(
+            target_agent=target,
+            product_id=product_id,
+            instruction=instruction,
+            status="pending"
+        )
+        db.add(new_task)
+        db.commit()
+        print(f"[*] Đã tạo Task cho {target} Agent!")
+    db.close()
+
+async def cskh_rag_service(customer_text: str, brand_tone: str):
+    # Kiểm tra nhanh đầu vào (Input Validation)
+    if len(customer_text.strip()) < 3 or customer_text.lower() in ["string", "test", "hello"]:
+        return {
+            "suggested_reply": "Dạ Agicom chào anh/chị, em có thể giúp gì được cho mình ạ?",
+            "confidence_score": 1.0,
+            "is_safe": True,
+            "sentiment_analysis": "bình thường",
+            "identified_product_id": "None",
+            "risk_level": "Thấp",
+            "risk_category": "None",
+            "sensor_insight": "Khách chào hỏi hoặc nhập tin nhắn test"
+        }
+
+    # 1. Retrieval
     policy_hits = policy_col.query(query_texts=[customer_text], n_results=1)
     product_hits = product_col.query(query_texts=[customer_text], n_results=1)
     qa_hits = resolved_qa_col.query(query_texts=[customer_text], n_results=1)
     
+    # Một mẹo nhỏ: Chỉ lấy context nếu điểm số (distance) thấp (nghĩa là độ khớp cao)
     def get_valid_hits(hits):
         if hits and hits.get('documents') and len(hits['documents'][0]) > 0:
+            # Nếu distance > 1.5 thường là kết quả "ép buộc", không liên quan
             if hits.get('distances') and hits['distances'][0][0] > 1.5:
                 return "Không có thông tin liên quan."
             return hits['documents'][0][0]
         return "Không có thông tin cụ thể."
 
-    context = f"Quy định: {get_valid_hits(policy_hits)}\nSản phẩm: {get_valid_hits(product_hits)}\nKinh nghiệm: {get_valid_hits(qa_hits)}"
+    context = f"""
+    Quy định: {get_valid_hits(policy_hits)}
+    Sản phẩm: {get_valid_hits(product_hits)}
+    Kinh nghiệm: {get_valid_hits(qa_hits)}
+    """
 
-    # 2. Generation (Kết hợp History + RAG)
-    user_prompt = CHAT_RAG_PROMPT.format(
-        chat_history=history_str, 
-        context=context, 
-        brand_tone=brand_tone
-    )
+    # 2. Generation (Gemini sẽ nhận prompt đã được siết chặt quy tắc)
+    # Lưu ý: Cần truyền rỗng cho chat_history vì version caunguyen không dùng history
+    user_prompt = CHAT_RAG_PROMPT.format(chat_history="Đoạn thoại trước: Trống (không có tin nhắn cũ)", context=context, brand_tone=brand_tone)
     
     response = await client.aio.models.generate_content(
         model="gemini-flash-latest",
-        contents=[user_prompt, f"Tin nhắn khách hiện tại: {customer_text}"],
+        contents=[user_prompt, f"Tin nhắn khách: {customer_text}"],
         config={"response_mime_type": "application/json"}
     )
     
-    result = json.loads(response.text)
+    try:
+        # Làm sạch chuỗi trước khi parse (loại bỏ markdown nếu có)
+        clean_text = response.text.replace("```json", "").replace("```", "").strip()
+        result = json.loads(clean_text)
 
-    # 3. Phân tích Sentiment & Risk - GIỮ NGUYÊN
+        # Nếu AI trả về một danh sách (List), lấy phần tử đầu tiên
+        if isinstance(result, list):
+            result = result[0] if len(result) > 0 else {}
+            
+    except Exception as e:
+        print(f"Lỗi phân giải JSON từ AI: {str(e)}")
+        result = {
+            "suggested_reply": "Dạ, em đang gặp chút gián đoạn, anh/chị đợi em giây lát nhé.",
+            "confidence_score": 0.0,
+            "is_safe": False
+        }
+
+    # 3. Trích xuất các thông tin AI vừa phân tích
     sentiment = result.get("sentiment_analysis", "bình thường")
-    product_id = result.get("identified_product_id", "General")
+    product_id = result.get("identified_product_id", "General") # AI tự xác định sản phẩm
     risk_level = result.get("risk_level", "Thấp")
     risk_cat = result.get("risk_category", "None")
     insight = result.get("sensor_insight")
 
+    # 4. Logic Guardrail: Nếu khách tức giận, chặn Auto-Reply
     if sentiment == "tức giận" or risk_level == "Cao":
         result["is_safe"] = False
+        print(f"[!] CẢNH BÁO RỦI RO: Khách {sentiment}, ID sản phẩm: {product_id}")
 
-    # 4. Coordination (Điều phối task tự động) - GIỮ NGUYÊN
+    # 5. Coordination: Điều phối dựa trên dữ liệu AI cung cấp
     if insight and insight != "None":
-        await coordinate_agents(insight, product_id, risk_level, risk_cat)
+        await coordinate_agents(
+            insight_text=insight, 
+            product_id=product_id, 
+            risk_level=risk_level, 
+            risk_category=risk_cat
+        )
 
     return result
 
@@ -181,22 +247,6 @@ async def learn_from_human_service(customer_q: str, human_a: str):
         print(f"LỖI HỌC TẬP: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-async def coordinate_agents(insight_text: str, product_id: str):
-    """
-    Dựa vào insight từ CSKH để tạo 'Task' cho các Agent khác.
-    """
-    insight_text = insight_text.lower()
-    
-    # 1. Nếu insight liên quan đến GIÁ
-    if any(word in insight_text for word in ["giá", "đắt", "rẻ", "chi phí", "giảm giá"]):
-        print(f"[Trigger] -> Gửi yêu cầu cho PRICING AGENT: Kiểm tra lại giá mã {product_id}")
-        # Logic: Gọi hàm analyze_strategy_slow_track() hoặc đánh dấu flag cho bộ phận giá
-        
-    # 2. Nếu insight liên quan đến THÔNG TIN/MÀU SẮC (Thiếu hàng)
-    if any(word in insight_text for word in ["màu", "không có", "hỏi thêm", "thông tin"]):
-        print(f"[Trigger] -> Gửi yêu cầu cho CONTENT AGENT: Cập nhật mô tả sản phẩm {product_id}")
-        # Logic: Tạo một yêu cầu sửa bài đăng trên sàn
-
 async def full_strategy_pipeline(sku_id: str, shop_profile: dict):
     """KẾT NỐI PHASE 1 & PHASE 2"""
     
@@ -227,37 +277,6 @@ async def full_strategy_pipeline(sku_id: str, shop_profile: dict):
     
     return json.loads(response.text)
 
-async def coordinate_agents(insight_text: str, product_id: str, risk_level: str = "Thấp", risk_category: str = "None"):
-    db = SessionLocal()
-    target = None
-    instruction = ""
-
-    # Ưu tiên xử lý Rủi ro
-    if risk_level == "Cao" or risk_category in ["Chất lượng sản phẩm", "Pháp lý/Phốt"]:
-        target = "RiskManager"
-        instruction = f"BÁO ĐỘNG KHẨN CẤP ({risk_category}): {insight_text}. Kiểm tra ngay sản phẩm {product_id}!"
-    
-    # Phân loại cho Pricing
-    elif any(word in insight_text.lower() for word in ["giá", "đắt", "rẻ", "voucher"]):
-        target = "Pricing"
-        instruction = f"Insight về giá cho sản phẩm {product_id}: {insight_text}"
-        
-    # Phân loại cho Content
-    elif any(word in insight_text.lower() for word in ["màu", "thông tin", "mô tả"]):
-        target = "Content"
-        instruction = f"Yêu cầu cập nhật nội dung cho {product_id}: {insight_text}"
-
-    if target:
-        new_task = CoordinationTask(
-            target_agent=target,
-            product_id=product_id,
-            instruction=instruction,
-            status="pending"
-        )
-        db.add(new_task)
-        db.commit()
-    db.close()
-
 async def chat_with_history_service(db, customer_id: str, user_text: str, brand_tone: str):
     # BƯỚC 1: Lấy lịch sử chat cũ (10 câu gần nhất)
     history_msgs = get_chat_history(db, customer_id, limit=10)
@@ -269,28 +288,50 @@ async def chat_with_history_service(db, customer_id: str, user_text: str, brand_
         history_context += f"{prefix}: {msg.content}\n"
 
     # BƯỚC 3: Truy xuất thêm từ Vector DB (RAG) - Tận dụng logic cũ
-    # (Giả sử bạn dùng lại hàm cskh_rag_service nhưng đã tách phần gọi Gemini ra)
-    # Ở đây tôi làm gọn lại để tập trung vào phần History
+    # (Tương tự cskh_rag_service để lấy context, chúng ta tái cấu trúc nhanh)
+    policy_hits = policy_col.query(query_texts=[user_text], n_results=1)
+    product_hits = product_col.query(query_texts=[user_text], n_results=1)
+    qa_hits = resolved_qa_col.query(query_texts=[user_text], n_results=1)
     
-    combined_prompt = f"""
-    Bạn là Agent CSKH của Agicom. Tông giọng: {brand_tone}.
-    
-    LỊCH SỬ HỘI THOẠI TRƯỚC ĐÓ:
-    {history_context}
-    
-    TIN NHẮN MỚI NHẤT CỦA KHÁCH:
-    {user_text}
-    
-    Hãy trả lời tin nhắn mới nhất dựa trên ngữ cảnh hội thoại trên. Trả về JSON theo định dạng:
-    {{"suggested_reply": "...", "confidence_score": 0.9}}
-    """
+    def get_valid_hits(hits):
+        if hits and hits.get('documents') and len(hits['documents'][0]) > 0:
+            if hits.get('distances') and hits['distances'][0][0] > 1.5:
+                return "Không có thông tin liên quan."
+            return hits['documents'][0][0]
+        return "Không có thông tin cụ thể."
 
-    # BƯỚC 4: Gọi Gemini
+    context = f"""
+    Quy định: {get_valid_hits(policy_hits)}
+    Sản phẩm: {get_valid_hits(product_hits)}
+    Kinh nghiệm: {get_valid_hits(qa_hits)}
+    """
+    
+    # BƯỚC 4: Generate
+    user_prompt = CHAT_RAG_PROMPT.format(chat_history=history_context, context=context, brand_tone=brand_tone)
+
     response = await client.aio.models.generate_content(
         model="gemini-flash-latest",
-        contents=combined_prompt,
+        contents=[user_prompt, f"Tin nhắn mới nhất của khách: {user_text}"],
         config={"response_mime_type": "application/json"}
     )
     
     ai_data = json.loads(response.text)
+    
+    sentiment = ai_data.get("sentiment_analysis", "bình thường")
+    product_id = ai_data.get("identified_product_id", "General")
+    risk_level = ai_data.get("risk_level", "Thấp")
+    risk_cat = ai_data.get("risk_category", "None")
+    insight = ai_data.get("sensor_insight")
+
+    if sentiment == "tức giận" or risk_level == "Cao":
+        ai_data["is_safe"] = False
+
+    if insight and insight != "None":
+        await coordinate_agents(
+            insight_text=insight, 
+            product_id=product_id, 
+            risk_level=risk_level, 
+            risk_category=risk_cat
+        )
+        
     return ai_data
