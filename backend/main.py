@@ -1,6 +1,7 @@
 from datetime import datetime
 import json
 import hashlib
+import os
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from google.genai import types
@@ -27,22 +28,36 @@ init_db()
 app = FastAPI(title="Agicom Core Backend")
 
 # ---------------------------------------------------------------------------
-# CORS – allow the Vanilla JS frontend served by VS Code Live Server / Vite
+# CORS – cho phép frontend Netlify và localhost kết nối
+# Có thể thu hẹp lại bằng cách set biến môi trường FRONTEND_URL trên Render
 # ---------------------------------------------------------------------------
-ALLOWED_ORIGINS =[
-    "http://localhost:5500",      
-    "http://127.0.0.1:5500",     
-    "http://localhost:3000",      
+FRONTEND_URL = os.getenv("FRONTEND_URL", "*")
+
+ALLOWED_ORIGINS = ["*"] if FRONTEND_URL == "*" else [
+    FRONTEND_URL,
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
+    "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],   
-    allow_headers=["*"],   
+    allow_credentials=False if FRONTEND_URL == "*" else True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+
+@app.get("/")
+async def root():
+    """Health check endpoint cho Render"""
+    return {"status": "ok", "message": "Agicom Backend đang chạy!", "version": "1.0.0"}
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy"}
 
 @app.get("/test-phase1/{sku_id}")
 async def test_data_analyst_agent(sku_id: str):

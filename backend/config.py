@@ -11,26 +11,22 @@ load_dotenv()
 API_KEY = os.getenv("GOOGLE_API_KEY")
 
 if not API_KEY:
-    raise ValueError("LỖI: Không tìm thấy GOOGLE_API_KEY trong file .env")
+    raise ValueError("LỖI: Không tìm thấy GOOGLE_API_KEY trong biến môi trường")
 
 client = genai.Client(api_key=API_KEY)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CHROMA_PATH = os.path.join(BASE_DIR, "chroma_db")
+# Sử dụng EphemeralClient cho môi trường cloud (Render) vì filesystem là ephemeral.
+# Dữ liệu ChromaDB sẽ tồn tại trong RAM suốt vòng đời của server instance.
+chroma_client = chromadb.EphemeralClient()
 
-# Khởi tạo ChromaDB Client với đường dẫn cố định
-chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
-
-# Sử dụng Embedding mặc định hoặc Gemini Embedding (nếu muốn tối ưu)
-# Ở đây dùng mặc định của Chroma để đơn giản cho MVP
+# Sử dụng Embedding mặc định của Chroma
 default_ef = embedding_functions.DefaultEmbeddingFunction()
 
-# Gemini Embedding
+# Gemini Embedding (tuỳ chọn nâng cao)
 class GeminiEmbeddingFunction(embedding_functions.EmbeddingFunction):
     def __call__(self, input: chromadb.Documents) -> chromadb.Embeddings:
-        # Gọi API Gemini để lấy vector (nhanh và không tốn RAM máy)
         response = client.models.embed_content(
-            model="text-embedding-004", # Model embedding của Google
+            model="text-embedding-004",
             contents=input
         )
         return response.embeddings
