@@ -924,7 +924,12 @@ async function loadDailySummary() {
       <div style="display:flex;align-items:center;justify-content:space-between;
         margin-top:12px;flex-wrap:wrap;gap:8px;">
         <div style="font-size:0.72rem;color:var(--text-muted);">📅 Ngày báo cáo: ${data.date}</div>
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button onclick="generateContentSuggestionsFromSummary(window._lastDailySummaryData)"
+            class="btn-approve"
+            style="font-size:0.76rem;padding:6px 12px;background:var(--accent-indigo);border-color:var(--accent-indigo);">
+            📝 Tạo đề xuất Content
+          </button>
           <button onclick="exportDailySummary()" class="btn-approve" style="font-size:0.76rem;padding:6px 12px;">
             📤 Xuất & Lưu trữ
           </button>
@@ -934,6 +939,8 @@ async function loadDailySummary() {
         </div>
       </div>
     `;
+    // Lưu lại để nút "Tạo đề xuất Content" dùng
+    window._lastDailySummaryData = data;
   } catch (err) {
     container.innerHTML = `
       <div style="color:var(--accent-rose);font-size:0.85rem;padding:12px;
@@ -1022,9 +1029,96 @@ navigate = function (page) {
       loadCrisisFromBackend();
     } else if (page === 'demo-customer') {
       _injectDemoCustomerPage();
+    } else if (page === 'content-suggestions') {
+      _injectContentSuggestionsBar();
     }
   }, 80);
 };
+
+/* ── Inject: Action bar trên trang Content Suggestions ── */
+function _injectContentSuggestionsBar() {
+  const pageContent = document.getElementById('pageContent');
+  if (!pageContent || document.getElementById('contentSuggestionsBar')) return;
+
+  const fromDailySugs = (typeof MOCK !== 'undefined' && Array.isArray(MOCK.content_suggestions_generated))
+    ? MOCK.content_suggestions_generated.filter(s => s._fromDailySummary)
+    : [];
+
+  const bar = document.createElement('div');
+  bar.id = 'contentSuggestionsBar';
+  bar.className = 'content-card';
+  bar.style.cssText = 'margin-bottom:16px;border:2px solid var(--accent-indigo);background:linear-gradient(135deg,rgba(99,102,241,0.06),rgba(16,185,129,0.03));';
+
+  if (fromDailySugs.length > 0) {
+    // Đã có suggestion từ báo cáo — hiện tóm tắt + nút refresh
+    const highCount = fromDailySugs.filter(s => s.priority === 'high').length;
+    bar.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="width:40px;height:40px;border-radius:10px;background:var(--accent-indigo-bg);
+            display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0;">📊</div>
+          <div>
+            <div style="font-size:0.85rem;font-weight:800;color:var(--accent-indigo);">
+              ${fromDailySugs.length} đề xuất content từ Báo cáo Hàng ngày
+            </div>
+            <div style="font-size:0.73rem;color:var(--text-muted);margin-top:2px;">
+              ${highCount > 0 ? `<span style="color:#ef4444;font-weight:700;">${highCount} ưu tiên cao</span> · ` : ''}
+              Tự động phân tích từ chat signals, reviews & báo cáo AI
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button onclick="generateContentSuggestionsFromSummary(window._lastDailySummaryData)"
+            class="btn-approve" style="font-size:0.75rem;padding:6px 12px;
+              background:var(--accent-indigo);border-color:var(--accent-indigo);">
+            🔄 Tạo lại từ báo cáo
+          </button>
+          <button onclick="MOCK.content_suggestions_generated=MOCK.content_suggestions_generated.filter(s=>!s._fromDailySummary);navigate('content-suggestions')"
+            class="btn-modal-cancel" style="font-size:0.75rem;padding:6px 12px;">
+            ✕ Xóa đề xuất AI
+          </button>
+        </div>
+      </div>`;
+  } else {
+    // Chưa có — hiện prompt hướng dẫn tạo
+    const hasDailySummary = !!window._lastDailySummaryData;
+    bar.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="width:40px;height:40px;border-radius:10px;background:rgba(99,102,241,0.1);
+            display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0;">🤖</div>
+          <div>
+            <div style="font-size:0.85rem;font-weight:700;color:var(--text-primary);">
+              Tạo đề xuất content từ dữ liệu thực
+            </div>
+            <div style="font-size:0.73rem;color:var(--text-muted);margin-top:2px;">
+              ${hasDailySummary
+                ? 'Đã có dữ liệu báo cáo hôm nay — nhấn để phân tích và sinh đề xuất'
+                : 'Tải Báo cáo Hàng ngày từ Dashboard hoặc dùng dữ liệu Demo để tạo'}
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          ${hasDailySummary ? `
+          <button onclick="generateContentSuggestionsFromSummary(window._lastDailySummaryData)"
+            class="btn-approve" style="font-size:0.75rem;padding:6px 14px;
+              background:var(--accent-indigo);border-color:var(--accent-indigo);">
+            📝 Tạo từ Báo cáo hôm nay
+          </button>` : ''}
+          <button onclick="generateContentSuggestionsFromSummary(null)"
+            class="btn-approve" style="font-size:0.75rem;padding:6px 14px;">
+            ⚡ Tạo từ dữ liệu Demo
+          </button>
+          <button onclick="navigate('dashboard')"
+            class="btn-modal-cancel" style="font-size:0.75rem;padding:6px 12px;">
+            📋 Tải Báo cáo
+          </button>
+        </div>
+      </div>`;
+  }
+
+  pageContent.insertBefore(bar, pageContent.firstChild);
+}
 
 /* ── Inject: Daily Summary Card vào Dashboard ── */
 function injectDailySummaryCard() {
@@ -1494,45 +1588,6 @@ function _injectDemoCustomerPage() {
   // Xóa placeholder (nếu còn)
   const ph = document.getElementById('demoCustomerPlaceholder');
   if (ph) ph.remove();
-
-  // ── Card Kịch bản Demo (luôn ở đầu trang) ──
-  if (!document.getElementById('demoScenarioCard')) {
-    const scenarioCard = document.createElement('div');
-    scenarioCard.id = 'demoScenarioCard';
-    scenarioCard.className = 'content-card';
-    scenarioCard.style.cssText = 'margin-bottom:16px;border:2px solid var(--accent-indigo);background:linear-gradient(135deg,rgba(99,102,241,0.06),rgba(139,92,246,0.03));';
-    scenarioCard.innerHTML = `
-      <div class="content-card-title" style="color:var(--accent-indigo);margin-bottom:6px;">
-        🎬 Kịch bản Demo — Luồng phát hiện & xử lý khủng hoảng
-      </div>
-      <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px;line-height:1.6;">
-        Chọn kịch bản để điền sẵn form review + chat. Sau khi gửi, một popup sẽ xuất hiện để chuyển thẳng đến
-        <strong style="color:var(--accent-rose);">Quản trị Khủng hoảng</strong> — nơi AI tự động tổng hợp cảnh báo và lập kế hoạch xử lý.
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <button onclick="_applyDemoScenario('anker')"
-          style="font-size:0.78rem;padding:7px 14px;border-radius:8px;border:none;cursor:pointer;
-            background:linear-gradient(135deg,#ef4444,#dc2626);color:white;font-weight:700;">
-          🔴 Cáp Anker lỗi hàng loạt
-        </button>
-        <button onclick="_applyDemoScenario('shipping')"
-          style="font-size:0.78rem;padding:7px 14px;border-radius:8px;border:1px solid var(--border-primary);
-            cursor:pointer;background:var(--bg-glass);color:var(--text-secondary);font-weight:600;">
-          📦 Vận chuyển hư hỏng
-        </button>
-        <button onclick="navigate('crisis-center')"
-          style="font-size:0.78rem;padding:7px 14px;border-radius:8px;margin-left:auto;
-            border:1px solid #ef4444;cursor:pointer;background:rgba(239,68,68,0.08);
-            color:#ef4444;font-weight:700;">
-          🛡 Xem Crisis Center →
-        </button>
-      </div>
-      <div id="demoScenarioStatus" style="display:none;margin-top:10px;padding:8px 12px;
-        background:rgba(99,102,241,0.08);border-radius:8px;font-size:0.74rem;
-        color:var(--text-secondary);line-height:1.8;border:1px solid rgba(99,102,241,0.2);">
-      </div>`;
-    pageContent.insertBefore(scenarioCard, pageContent.firstChild);
-  }
 
   // ── Section 1: Review Form ──
   if (!document.getElementById('reviewSubmitForm')) {
@@ -2217,6 +2272,240 @@ function _renderCrisisResponsePlan(panelEl, data) {
     const pc = document.getElementById('pageContent');
     if (pc) pc.insertBefore(planEl, pc.firstChild);
   }
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+   13. CONTENT SUGGESTIONS — Sinh đề xuất từ Báo cáo Hàng ngày
+   ────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Phân tích dữ liệu báo cáo hàng ngày (hoặc MOCK khi offline)
+ * → sinh đề xuất content có cấu trúc → inject vào MOCK.content_suggestions_generated
+ * → navigate sang trang "content-suggestions".
+ *
+ * @param {object|null} summaryData  - kết quả từ /daily-summary, null = dùng MOCK thuần
+ */
+function generateContentSuggestionsFromSummary(summaryData) {
+  if (typeof MOCK === 'undefined') return;
+
+  // Xóa các suggestion đã generated trước đó để tránh trùng
+  MOCK.content_suggestions_generated =
+    MOCK.content_suggestions_generated.filter(s => !s._fromDailySummary);
+
+  const ts = Date.now();
+  const newSugs = [];
+
+  // ── Helpers ─────────────────────────────────────────────────────────
+  const detectType = (text) => {
+    const t = (text || '').toLowerCase();
+    if (t.includes('video') || t.includes('quay') || t.includes('tiktok') || t.includes('youtube')) return 'video';
+    if (t.includes('so sánh') || t.includes('compare') || t.includes(' vs ')) return 'comparison';
+    if (t.includes('faq') || t.includes('blog') || t.includes('hướng dẫn') || t.includes('câu hỏi') || t.includes('giải đáp')) return 'blog_faq';
+    return 'guide';
+  };
+
+  const platformFor = (type) => ({
+    video: 'TikTok + YouTube', blog_faq: 'Blog + Website',
+    comparison: 'Blog + YouTube', guide: 'Website + Shopee'
+  }[type] || 'Đa nền tảng');
+
+  const prodTimeFor = (type) => ({
+    video: '1-2 ngày quay + editing', blog_faq: '2-4 giờ viết + review',
+    comparison: '1 ngày nghiên cứu + viết', guide: '3-5 giờ thiết kế/viết'
+  }[type] || '1-2 ngày');
+
+  const findCluster = (keyword) => {
+    if (!Array.isArray(MOCK.chat_clusters)) return null;
+    const kw = (keyword || '').toLowerCase();
+    return MOCK.chat_clusters.find(cl =>
+      cl.label.toLowerCase().split(' ').some(w => w.length > 3 && kw.includes(w))
+    ) || null;
+  };
+
+  const findNegReviews = (keyword) => {
+    if (!Array.isArray(MOCK.reviews)) return [];
+    const kw = (keyword || '').toLowerCase().split(/\s+/)[0];
+    return MOCK.reviews.filter(r =>
+      r.rating <= 3 &&
+      ((r.text || '').toLowerCase().includes(kw) || (r.product_id || '').toLowerCase().includes(kw))
+    );
+  };
+
+  const buildSug = ({ id, taskText, source, urgency, dateLabel }) => {
+    const type = detectType(taskText);
+    const cluster = findCluster(taskText);
+    const negRevs = findNegReviews(taskText);
+
+    let score = urgency === 'high' ? 83 : 66;
+    if (cluster?.urgent) score += 10;
+    if (negRevs.length > 0) score += Math.min(negRevs.length * 4, 12);
+    score = Math.min(99, score);
+
+    const chatCount = cluster ? cluster.count : Math.max(3, Math.round(score / 8));
+    const chatTopic = cluster ? cluster.label : taskText.split('—')[0].trim().substring(0, 50);
+    const sampleQs = cluster
+      ? [`"${cluster.label}"`, `Khách hỏi về ${cluster.label.toLowerCase().split(' ').slice(0, 3).join(' ')}`]
+      : [`"${taskText.substring(0, 45)}"`, 'Khách phản ánh vấn đề liên quan'];
+    const sampleRevs = negRevs.slice(0, 2).map(r => (r.text || '').substring(0, 60) + (r.text?.length > 60 ? '...' : ''));
+
+    return {
+      id,
+      priority: score >= 80 ? 'high' : 'medium',
+      status: 'pending',
+      type,
+      title: taskText,
+      platform: platformFor(type),
+      chatbot_signal: { count: chatCount, topic: chatTopic, sample_questions: sampleQs },
+      review_signal: {
+        count: negRevs.length,
+        neg_pct: negRevs.length > 0 ? Math.min(99, 45 + negRevs.length * 12) : 0,
+        sample_reviews: sampleRevs
+      },
+      combined_score: score,
+      estimated_impact: `Giảm ~${Math.round(chatCount * 2.2)}% câu hỏi liên quan · tăng CR ${score >= 80 ? '8–12%' : '4–7%'}`,
+      estimated_production: prodTimeFor(type),
+      angle: `Nguồn: báo cáo ${dateLabel}. Ưu tiên dựa trên ${cluster ? `${chatCount} câu chatbot` : 'phân tích tín hiệu'}${negRevs.length > 0 ? ` + ${negRevs.length} review tiêu cực` : ''}.`,
+      _fromDailySummary: true,
+      _source: source
+    };
+  };
+
+  // ── Case 1: Có dữ liệu từ backend ───────────────────────────────────
+  if (summaryData) {
+    const dateLabel = summaryData.date || 'hôm nay';
+    const contentTasks = summaryData.growth_strategy?.content_optimizations || [];
+    const riskActions  = (summaryData.risk_management?.urgent_actions || [])
+      .filter(t => /nội dung|content|thông tin|mô tả|faq|video/i.test(t));
+    const insights     = summaryData.customer_sentiment_overview || [];
+
+    // Từ content_optimizations
+    contentTasks.forEach((task, i) => {
+      newSugs.push(buildSug({ id: `daily-co-${ts}-${i}`, taskText: task, source: 'content_optimization', urgency: 'medium', dateLabel }));
+    });
+
+    // Từ urgent_actions liên quan content
+    riskActions.forEach((task, i) => {
+      if (!newSugs.some(s => s.title.toLowerCase().includes(task.toLowerCase().split(' ')[2]))) {
+        newSugs.push(buildSug({ id: `daily-ra-${ts}-${i}`, taskText: task, source: 'risk_action', urgency: 'high', dateLabel }));
+      }
+    });
+
+    // Từ customer_sentiment_overview — nhóm theo từ khoá
+    const insightMap = {};
+    insights.forEach(ins => {
+      const kw = /pin|sạc/.test(ins) ? 'pin/sạc'
+               : /cáp|dây/.test(ins) ? 'cáp sạc'
+               : /giao|ship/.test(ins) ? 'giao hàng'
+               : /bảo hành/.test(ins) ? 'bảo hành'
+               : /auth|hàng thật|chính hãng/.test(ins) ? 'hàng auth'
+               : 'chung';
+      (insightMap[kw] = insightMap[kw] || []).push(ins);
+    });
+    Object.entries(insightMap).forEach(([kw, arr], i) => {
+      // Chỉ tạo nếu đủ tín hiệu và chưa bị cover bởi contentTasks
+      const alreadyCovered = newSugs.some(s => s.title.toLowerCase().includes(kw.split('/')[0]));
+      if (!alreadyCovered && arr.length >= 2) {
+        const type = /video|quay/.test(arr.join(' ')) ? 'video' : 'blog_faq';
+        const score = Math.min(99, 58 + arr.length * 5);
+        newSugs.push({
+          id: `daily-ins-${ts}-${i}`,
+          priority: score >= 75 ? 'high' : 'medium',
+          status: 'pending',
+          type,
+          title: `FAQ: Giải đáp loạt câu hỏi về "${kw}" — ${arr.length} insight từ chatbot`,
+          platform: platformFor(type),
+          chatbot_signal: { count: arr.length * 4, topic: `Khách hỏi về ${kw}`, sample_questions: arr.slice(0, 2) },
+          review_signal: { count: 0, neg_pct: 0, sample_reviews: [] },
+          combined_score: score,
+          estimated_impact: `Giải đáp trực tiếp ${arr.length * 4}+ câu hỏi tương tự từ chatbot trong ngày`,
+          estimated_production: prodTimeFor(type),
+          angle: `Tổng hợp ${arr.length} insight hôm nay về "${kw}": ${arr.slice(0, 2).join(' | ')}`,
+          _fromDailySummary: true,
+          _source: 'sentiment_insight'
+        });
+      }
+    });
+
+  // ── Case 2: Offline / Demo mode — phân tích từ MOCK data ────────────
+  } else {
+    const dateLabel = new Date().toLocaleDateString('vi-VN');
+
+    // Từ chat_clusters (urgent + lớn)
+    (MOCK.chat_clusters || [])
+      .filter(cl => cl.urgent || cl.count >= 10)
+      .forEach((cl, i) => {
+        const negRevs = findNegReviews(cl.label);
+        const type = detectType(cl.label + ' ' + (cl.action || ''));
+        const score = Math.min(99, (cl.urgent ? 86 : 68) + Math.min(negRevs.length * 4, 10));
+        newSugs.push({
+          id: `mock-cl-${ts}-${i}`,
+          priority: cl.urgent ? 'high' : 'medium',
+          status: 'pending',
+          type,
+          title: `${cl.icon || '📝'} ${cl.action} — "${cl.label}"`,
+          platform: platformFor(type),
+          chatbot_signal: { count: cl.count, topic: cl.label, sample_questions: [`"${cl.label}"`, `Khách hỏi về ${cl.label.split(' ').slice(0, 3).join(' ')}`] },
+          review_signal: { count: negRevs.length, neg_pct: negRevs.length > 0 ? 65 : 0, sample_reviews: negRevs.slice(0, 2).map(r => (r.text || '').substring(0, 60)) },
+          combined_score: score,
+          estimated_impact: cl.impact || `Giảm ~${Math.round(cl.count * 2.1)}% câu hỏi về "${cl.label}"`,
+          estimated_production: prodTimeFor(type),
+          angle: `Demo mode — ${cl.count} khách hỏi chủ đề này. Hành động: ${cl.action}`,
+          _fromDailySummary: true,
+          _source: 'mock_cluster'
+        });
+      });
+
+    // Từ reviews tiêu cực nhóm theo product
+    const byProduct = {};
+    (MOCK.reviews || []).filter(r => r.rating <= 2).forEach(r => {
+      const pid = r.product_id || 'General';
+      (byProduct[pid] = byProduct[pid] || []).push(r);
+    });
+    Object.entries(byProduct).forEach(([pid, revs], i) => {
+      const alreadyCovered = newSugs.some(s =>
+        s.title.toLowerCase().includes(pid.toLowerCase().replace(/-/g, ' ').split(' ')[0])
+      );
+      if (!alreadyCovered) {
+        const score = Math.min(99, 62 + revs.length * 9);
+        newSugs.push({
+          id: `mock-rv-${ts}-${i}`,
+          priority: revs.length >= 2 ? 'high' : 'medium',
+          status: 'pending',
+          type: 'guide',
+          title: `📢 Nội dung xử lý phản hồi tiêu cực — ${pid.replace(/-/g, ' ')}`,
+          platform: 'Shopee + Website',
+          chatbot_signal: { count: revs.length * 3, topic: `Phàn nàn về ${pid}`, sample_questions: revs.slice(0, 2).map(r => `"${(r.text || '').substring(0, 45)}"`) },
+          review_signal: { count: revs.length, neg_pct: 100, sample_reviews: revs.slice(0, 2).map(r => (r.text || '').substring(0, 60)) },
+          combined_score: score,
+          estimated_impact: 'Khôi phục rating sản phẩm + giảm churn rate',
+          estimated_production: '2-4 giờ viết FAQ + template phản hồi review',
+          angle: `${revs.length} review tiêu cực gần đây. Tạo FAQ giải đáp + mẫu phản hồi chuẩn cho ${pid}.`,
+          _fromDailySummary: true,
+          _source: 'mock_review'
+        });
+      }
+    });
+  }
+
+  if (newSugs.length === 0) {
+    showToast('ℹ️ Không tìm thấy tín hiệu content đủ mạnh để tạo đề xuất mới.', 'info');
+    return;
+  }
+
+  // Sắp xếp giảm dần theo score
+  newSugs.sort((a, b) => b.combined_score - a.combined_score);
+
+  // Inject vào đầu danh sách (trước các suggestion MOCK gốc)
+  MOCK.content_suggestions_generated = [...newSugs, ...MOCK.content_suggestions_generated];
+
+  const highCount = newSugs.filter(s => s.priority === 'high').length;
+
+  // Toast thông báo + navigate
+  showToast(
+    `✅ Đã tạo <strong>${newSugs.length} đề xuất content</strong>${highCount > 0 ? ` (${highCount} ưu tiên cao)` : ''} từ báo cáo — Đang chuyển sang trang Content...`,
+    'success'
+  );
+  setTimeout(() => navigate('content-suggestions'), 700);
 }
 
 /* ──────────────────────────────────────────────────────────────────────

@@ -1,0 +1,36 @@
+{
+    "sku_id": "S24-ULTRA-001",
+    "internal_data": {
+        "current_price": 29990000,
+        "stock_level": 12,
+        "cost_price": 26000000,
+        "min_margin_percent": 8
+    },
+    "market_data": {
+        "competitors": [
+            {
+                "name": "Hoàng Hà Mobile",
+                "price": 28490000,
+                "is_mall": true,
+                "rating": 4.8
+            },
+            {
+                "name": "CellphoneS",
+                "price": 28990000,
+                "is_mall": true,
+                "rating": 4.9
+            },
+            {
+                "name": "Shop Rác",
+                "price": 25000000,
+                "is_mall": false,
+                "rating": 2.1
+            }
+        ],
+        "customer_reviews": [
+            "Máy dùng rất tốt nhưng shop giao hơi chậm",
+            "Giá hơi cao so với bên Hoàng Hà",
+            "Bút S-Pen rất tiện lợi cho công việc"
+        ]
+    }
+}

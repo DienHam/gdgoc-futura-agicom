@@ -1,0 +1,24 @@
+{
+    "sku_id": "ANKER-100W-01",
+    "internal_data": {
+        "current_price": 350000,
+        "stock_level": 150,
+        "cost_price": 180000,
+        "min_margin_percent": 15
+    },
+    "market_data": {
+        "competitors": [
+            {
+                "name": "Anker Official",
+                "price": 340000,
+                "is_mall": true,
+                "rating": 4.9
+            }
+        ],
+        "customer_reviews": [
+            "Sạc nhanh, dây bền",
+            "Dây hơi nóng khi sạc Macbook",
+            "Mới dùng 1 tuần đã hỏng đầu cắm"
+        ]
+    }
+}
