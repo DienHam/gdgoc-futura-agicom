@@ -64,12 +64,29 @@ NGỮ CẢNH TRUY XUẤT (CONTEXT):
 
 TÔNG GIỌNG: {brand_tone}
 
-QUY TẮC VỀ CONFIDENCE SCORE (BẮT BUỘC):
-- confidence_score thể hiện mức độ tự tin rằng câu trả lời đề xuất là PHÙ HỢP để tự động gửi ngay cho khách.
-- Nếu is_safe = false → PHẢI đặt confidence_score <= 0.45 (câu trả lời chưa đủ an toàn để gửi tự động).
-- Nếu khách tức giận, khiếu nại, đe dọa, hoặc yêu cầu ngoài chính sách → is_safe = false và confidence_score <= 0.4.
-- Nếu thông tin trong knowledge base không đủ để trả lời chắc chắn → confidence_score từ 0.5 đến 0.69.
-- Chỉ đặt confidence_score >= 0.7 khi is_safe = true VÀ câu trả lời dựa trên thông tin rõ ràng trong knowledge base.
+QUY TẮC ĐÁNH GIÁ ĐỘ TỰ TIN (CONFIDENCE SCORE) & TÍNH AN TOÀN (IS_SAFE):
+Bạn BẮT BUỘC phải phân loại tin nhắn của khách hàng vào đúng 1 trong 3 nhóm dưới đây và tuân thủ tuyệt đối dải điểm được giao. Hãy đánh giá cẩn thận từ trên xuống dưới:
+
+* NHÓM 1: KHỦNG HOẢNG / RỦI RO (Cần con người can thiệp khẩn cấp)
+- Điều kiện: Khách hàng dùng từ thô tục, tức giận, đe dọa bóc phốt, khiếu nại gay gắt, hoặc đòi hỏi quyền lợi trái với chính sách của shop.
+- Hành động: 
+  + is_safe = false
+  + confidence_score = (Chọn ngẫu nhiên từ 0.10 đến 0.49)
+  + Bắt buộc ghi rõ lý do vào trường 'flag_reason'.
+
+* NHÓM 2: THIẾU KIẾN THỨC / NGHI NGỜ (Cần nhân viên kiểm tra lại nháp)
+- Điều kiện: Thái độ khách hàng bình thường (không tức giận), NHƯNG thông tin trong Knowledge Base không có, không rõ ràng, hoặc bạn phải tự suy đoán để trả lời.
+- Hành động: 
+  + is_safe = true (vì ngữ cảnh không độc hại)
+  + confidence_score = (Chọn ngẫu nhiên từ 0.50 đến 0.69)
+  + Để trống 'flag_reason'.
+
+* NHÓM 3: CHẮC CHẮN / TỰ ĐỘNG GỬI (Đủ điều kiện Auto-reply)
+- Điều kiện: Thái độ khách hàng bình thường VÀ bạn tìm thấy câu trả lời chính xác, rõ ràng 100% từ thông tin được cung cấp trong Knowledge Base hoặc Lịch sử Chat.
+- Hành động: 
+  + is_safe = true
+  + confidence_score = (Chọn ngẫu nhiên từ 0.70 đến 0.99)
+  + Để trống 'flag_reason'.
 
 TRẢ VỀ JSON:
 - suggested_reply: Câu trả lời
