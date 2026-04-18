@@ -110,28 +110,43 @@ async function apiCall(endpoint, method = 'GET', body = null) {
    ────────────────────────────────────────────────────────────────────── */
 
 async function checkBackendHealth() {
-  try {
-    const data = await apiCall('/health');
-    if (data.status === 'healthy') {
-      _backendConnected = true;
-      showToast('🟢 Backend kết nối thành công! Tất cả tính năng AI đang hoạt động.', 'success');
-      // Cập nhật indicator ở header
-      const indicator = document.getElementById('backendStatusIndicator');
-      if (indicator) {
-        indicator.textContent = '🟢 Backend Online';
-        indicator.style.color = 'var(--accent-emerald)';
+  const indicator = document.getElementById('backendStatusIndicator');
+  // Hiện trạng thái đang kết nối
+  if (indicator) {
+    indicator.textContent = '⏳ Đang kết nối...';
+    indicator.style.color = 'var(--text-muted)';
+  }
+  // Render free tier có thể ngủ — retry tối đa 2 lần, timeout 12s mỗi lần
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
+      const res = await fetch(API_BASE + '/health', { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 'healthy') {
+          _backendConnected = true;
+          showToast('🟢 Backend kết nối thành công! Tất cả tính năng AI đang hoạt động.', 'success');
+          if (indicator) { indicator.textContent = '🟢 Backend Online'; indicator.style.color = 'var(--accent-emerald)'; }
+          return;
+        }
       }
-    }
-  } catch (err) {
-    _backendConnected = false;
-    showToast('🟡 Backend chưa kết nối — Đang chạy chế độ Demo (dữ liệu mẫu)', 'warning');
-    console.warn('[Agicom] Backend không khả dụng:', err.message);
-    const indicator = document.getElementById('backendStatusIndicator');
-    if (indicator) {
-      indicator.textContent = '🔴 Backend Offline (Demo Mode)';
-      indicator.style.color = 'var(--accent-rose)';
+    } catch (err) {
+      if (attempt < 2) {
+        // Render đang wake up — thử lần 2 sau 8s
+        if (indicator) { indicator.textContent = '⏳ Đang khởi động backend...'; indicator.style.color = '#f59e0b'; }
+        showToast('⏳ Backend đang khởi động (Render cold start) — thử lại sau 8 giây...', 'info');
+        await new Promise(r => setTimeout(r, 8000));
+        continue;
+      }
+      console.warn('[Agicom] Backend không khả dụng:', err.message);
     }
   }
+  // Hết retry — chuyển về Demo mode
+  _backendConnected = false;
+  showToast('🟡 Backend chưa kết nối — Đang chạy chế độ Demo (dữ liệu mẫu). Kiểm tra URL trong config.js.', 'warning');
+  if (indicator) { indicator.textContent = '🔴 Backend Offline (Demo Mode)'; indicator.style.color = 'var(--accent-rose)'; }
 }
 
 /* ──────────────────────────────────────────────────────────────────────
@@ -1030,40 +1045,140 @@ navigate = function (page) {
     } else if (page === 'demo-customer') {
       _injectDemoCustomerPage();
     } else if (page === 'content-suggestions') {
-      _injectContentSuggestionsBar();
+      loadContentSuggestionsFromBackend().then(() => _injectContentSuggestionsBar());
     }
   }, 80);
 };
+
+/* ── Load content suggestions từ backend, merge vào MOCK ── */
+async function loadContentSuggestionsFromBackend() {
+  if (typeof MOCK === 'undefined') return { success: false, count: 0 };
+  try {
+    const data = await apiCall('/api/content-suggestions');
+    if (!data || !Array.isArray(data.suggestions)) return { success: false, count: 0 };
+
+    // Xoá các suggestion đã load từ backend trước đó
+    MOCK.content_suggestions_generated =
+      MOCK.content_suggestions_generated.filter(s => !s._fromBackend);
+
+    // Merge: backend suggestions lên trước, giữ lại các suggestion từ daily summary
+    const fromDailySummary = MOCK.content_suggestions_generated.filter(s => s._fromDailySummary);
+    const fromOther        = MOCK.content_suggestions_generated.filter(s => !s._fromDailySummary);
+
+    // Backend suggestions (đã có status thực từ DB)
+    const backendSugs = data.suggestions.map(s => ({ ...s, _fromBackend: true }));
+
+    MOCK.content_suggestions_generated = [...fromDailySummary, ...backendSugs, ...fromOther];
+
+    // Lưu meta để dùng trong bar
+    window._contentBackendMeta = data.meta || {};
+    return { success: true, count: backendSugs.length };
+  } catch (_err) {
+    // Backend offline — giữ MOCK nguyên
+    window._contentBackendMeta = null;
+    return { success: false, count: 0 };
+  }
+}
+
+/* ── Cập nhật status đề xuất: MOCK + backend (fire-and-forget) ── */
+async function updateContentSuggestionStatus(sugId, newStatus) {
+  if (typeof MOCK === 'undefined') return;
+  const sug = MOCK.content_suggestions_generated.find(s => s.id === sugId);
+  if (sug) sug.status = newStatus;
+  try {
+    await apiCall(`/api/content-suggestions/${encodeURIComponent(sugId)}/status`, 'PATCH', {
+      status: newStatus,
+      title: sug?.title || sugId,
+      type: sug?.type || 'guide',
+      platform: sug?.platform || '',
+      priority: sug?.priority || 'medium',
+      combined_score: sug?.combined_score || 0,
+      chatbot_count: sug?.chatbot_signal?.count || 0,
+      chatbot_topic: sug?.chatbot_signal?.topic || '',
+      review_count: sug?.review_signal?.count || 0,
+      review_neg_pct: sug?.review_signal?.neg_pct || 0,
+      sample_questions: sug?.chatbot_signal?.sample_questions || [],
+      sample_reviews: sug?.review_signal?.sample_reviews || [],
+      angle: sug?.angle || '',
+      estimated_impact: sug?.estimated_impact || '',
+      estimated_production: sug?.estimated_production || '',
+      source: sug?._source || 'frontend'
+    });
+  } catch (_e) {
+    // silent — MOCK đã được cập nhật rồi
+  }
+}
+
+/* ── Các hàm action cho nút trong thẻ đề xuất content ── */
+function scheduleSuggestion(sugId) {
+  updateContentSuggestionStatus(sugId, 'scheduled');
+  showToast('✅ Đã lên lịch sản xuất content!', 'success');
+  setTimeout(() => navigate('content-suggestions'), 300);
+}
+
+function saveSuggestion(sugId) {
+  updateContentSuggestionStatus(sugId, 'saved');
+  showToast('📌 Đã lưu vào danh sách theo dõi!', 'info');
+  setTimeout(() => navigate('content-suggestions'), 300);
+}
+
+function ignoreSuggestion(sugId) {
+  updateContentSuggestionStatus(sugId, 'ignored');
+  showToast('✕ Đã ẩn đề xuất này', 'warning');
+  setTimeout(() => navigate('content-suggestions'), 300);
+}
+
+function restoreSuggestion(sugId) {
+  updateContentSuggestionStatus(sugId, 'pending');
+  showToast('↩ Đã khôi phục về trạng thái chờ', 'info');
+  setTimeout(() => navigate('content-suggestions'), 300);
+}
 
 /* ── Inject: Action bar trên trang Content Suggestions ── */
 function _injectContentSuggestionsBar() {
   const pageContent = document.getElementById('pageContent');
   if (!pageContent || document.getElementById('contentSuggestionsBar')) return;
 
-  const fromDailySugs = (typeof MOCK !== 'undefined' && Array.isArray(MOCK.content_suggestions_generated))
-    ? MOCK.content_suggestions_generated.filter(s => s._fromDailySummary)
-    : [];
+  const allSugs = (typeof MOCK !== 'undefined' && Array.isArray(MOCK.content_suggestions_generated))
+    ? MOCK.content_suggestions_generated : [];
+
+  const fromDailySugs   = allSugs.filter(s => s._fromDailySummary && s.status !== 'ignored');
+  const fromBackendSugs = allSugs.filter(s => s._fromBackend       && s.status !== 'ignored');
+  const hasAISugs       = fromDailySugs.length > 0 || fromBackendSugs.length > 0;
+  const meta            = window._contentBackendMeta;
+  const backendOnline   = meta !== undefined && meta !== null;
 
   const bar = document.createElement('div');
   bar.id = 'contentSuggestionsBar';
   bar.className = 'content-card';
   bar.style.cssText = 'margin-bottom:16px;border:2px solid var(--accent-indigo);background:linear-gradient(135deg,rgba(99,102,241,0.06),rgba(16,185,129,0.03));';
 
-  if (fromDailySugs.length > 0) {
-    // Đã có suggestion từ báo cáo — hiện tóm tắt + nút refresh
-    const highCount = fromDailySugs.filter(s => s.priority === 'high').length;
+  if (hasAISugs) {
+    const totalAI   = fromDailySugs.length + fromBackendSugs.length;
+    const highCount = [...fromDailySugs, ...fromBackendSugs].filter(s => s.priority === 'high').length;
+    const savedCount = allSugs.filter(s => s.status === 'saved').length;
+    const scheduledCount = allSugs.filter(s => s.status === 'scheduled').length;
+
+    const sourceBadge = backendOnline
+      ? `<span style="background:#dcfce7;color:#16a34a;font-size:0.68rem;font-weight:700;padding:2px 7px;border-radius:10px;margin-left:6px;">🟢 Backend</span>`
+      : `<span style="background:#fef9c3;color:#854d0e;font-size:0.68rem;font-weight:700;padding:2px 7px;border-radius:10px;margin-left:6px;">🟡 Demo</span>`;
+
     bar.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
         <div style="display:flex;align-items:center;gap:12px;">
           <div style="width:40px;height:40px;border-radius:10px;background:var(--accent-indigo-bg);
             display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0;">📊</div>
           <div>
-            <div style="font-size:0.85rem;font-weight:800;color:var(--accent-indigo);">
-              ${fromDailySugs.length} đề xuất content từ Báo cáo Hàng ngày
+            <div style="font-size:0.85rem;font-weight:800;color:var(--accent-indigo);display:flex;align-items:center;gap:4px;">
+              ${totalAI} đề xuất AI${sourceBadge}
             </div>
             <div style="font-size:0.73rem;color:var(--text-muted);margin-top:2px;">
               ${highCount > 0 ? `<span style="color:#ef4444;font-weight:700;">${highCount} ưu tiên cao</span> · ` : ''}
-              Tự động phân tích từ chat signals, reviews & báo cáo AI
+              ${savedCount > 0 ? `<span style="color:#f59e0b;font-weight:700;">${savedCount} đã lưu</span> · ` : ''}
+              ${scheduledCount > 0 ? `<span style="color:#10b981;font-weight:700;">${scheduledCount} đã lên lịch</span> · ` : ''}
+              ${backendOnline && meta
+                ? `Backend: ${meta.neg_review_count || 0} reviews · ${meta.content_tasks_count || 0} tasks`
+                : 'Phân tích từ chat signals, reviews & MOCK data'}
             </div>
           </div>
         </div>
@@ -1073,34 +1188,40 @@ function _injectContentSuggestionsBar() {
               background:var(--accent-indigo);border-color:var(--accent-indigo);">
             🔄 Tạo lại từ báo cáo
           </button>
-          <button onclick="MOCK.content_suggestions_generated=MOCK.content_suggestions_generated.filter(s=>!s._fromDailySummary);navigate('content-suggestions')"
+          ${backendOnline ? `<button onclick="loadContentSuggestionsFromBackend().then(()=>navigate('content-suggestions'))"
+            class="btn-approve" style="font-size:0.75rem;padding:6px 12px;
+              background:#10b981;border-color:#10b981;">
+            ↓ Sync Backend
+          </button>` : ''}
+          <button onclick="MOCK.content_suggestions_generated=MOCK.content_suggestions_generated.filter(s=>!s._fromDailySummary&&!s._fromBackend);navigate('content-suggestions')"
             class="btn-modal-cancel" style="font-size:0.75rem;padding:6px 12px;">
             ✕ Xóa đề xuất AI
           </button>
         </div>
       </div>`;
   } else {
-    // Chưa có — hiện prompt hướng dẫn tạo
+    // Chưa có — prompt hướng dẫn tạo
     const hasDailySummary = !!window._lastDailySummaryData;
+    const backendBadge = backendOnline
+      ? `<span style="background:#dcfce7;color:#16a34a;font-size:0.68rem;font-weight:700;padding:2px 6px;border-radius:8px;">● Backend online</span>`
+      : `<span style="background:#fef9c3;color:#854d0e;font-size:0.68rem;font-weight:700;padding:2px 6px;border-radius:8px;">○ Offline — dùng MOCK</span>`;
     bar.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
         <div style="display:flex;align-items:center;gap:12px;">
           <div style="width:40px;height:40px;border-radius:10px;background:rgba(99,102,241,0.1);
             display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0;">🤖</div>
           <div>
-            <div style="font-size:0.85rem;font-weight:700;color:var(--text-primary);">
-              Tạo đề xuất content từ dữ liệu thực
+            <div style="font-size:0.85rem;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:6px;">
+              Tạo đề xuất content từ dữ liệu thực ${backendBadge}
             </div>
             <div style="font-size:0.73rem;color:var(--text-muted);margin-top:2px;">
-              ${hasDailySummary
-                ? 'Đã có dữ liệu báo cáo hôm nay — nhấn để phân tích và sinh đề xuất'
-                : 'Tải Báo cáo Hàng ngày từ Dashboard hoặc dùng dữ liệu Demo để tạo'}
+              ${hasDailySummary ? 'Đã có báo cáo hôm nay — nhấn để phân tích'
+                : 'Tải Báo cáo từ Dashboard hoặc dùng dữ liệu Demo để bắt đầu'}
             </div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          ${hasDailySummary ? `
-          <button onclick="generateContentSuggestionsFromSummary(window._lastDailySummaryData)"
+          ${hasDailySummary ? `<button onclick="generateContentSuggestionsFromSummary(window._lastDailySummaryData)"
             class="btn-approve" style="font-size:0.75rem;padding:6px 14px;
               background:var(--accent-indigo);border-color:var(--accent-indigo);">
             📝 Tạo từ Báo cáo hôm nay
@@ -2510,6 +2631,96 @@ function generateContentSuggestionsFromSummary(summaryData) {
 
 /* ──────────────────────────────────────────────────────────────────────
    12. INIT
+   ────────────────────────────────────────────────────────────────────── */
+
+/* ──────────────────────────────────────────────────────────────────────
+   13. GLOBAL EVENT DELEGATION — Wire các nút action toàn trang với backend
+   ────────────────────────────────────────────────────────────────────── */
+
+// Intercept chat inbox approval/send buttons → học từ phản hồi của chủ shop
+document.addEventListener('click', async function (e) {
+  // "Gửi ngay" (duyệt nháp AI không sửa) → gọi learn-feedback
+  const acceptBtn = e.target.closest('.btn-chat-accept');
+  if (acceptBtn) {
+    // Lấy nháp từ MOCK (nếu có) để học
+    if (typeof MOCK !== 'undefined' && typeof currentChatId !== 'undefined') {
+      const msgs = MOCK.chat_messages[currentChatId] || [];
+      const draftMsg = msgs.find(m => m.from === 'ai_draft');
+      if (draftMsg && _backendConnected) {
+        // Fire-and-forget: AI học từ việc chủ shop approve draft
+        apiCall('/learn-feedback', 'POST', { customer_q: currentChatId, human_a: draftMsg.text }).catch(() => {});
+      }
+    }
+    return; // app4.js handlePageClick xử lý tiếp
+  }
+
+  // "Gửi bản đã sửa" → dạy AI từ bản sửa của chủ shop
+  const sendEditedBtn = e.target.closest('.btn-chat-send-edited');
+  if (sendEditedBtn) {
+    if (typeof currentChatId !== 'undefined' && _backendConnected) {
+      const ta = document.getElementById('chatDraftEditArea');
+      const editedText = ta ? ta.value.trim() : '';
+      if (editedText) {
+        // Dạy AI: "với câu hỏi này, chủ shop muốn trả lời như vậy"
+        apiCall('/learn-feedback', 'POST', { customer_q: currentChatId, human_a: editedText }).catch(() => {});
+      }
+    }
+    return;
+  }
+}, true); // useCapture=true để chạy trước handlePageClick của app4.js
+
+document.addEventListener('click', async function (e) {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const id     = btn.dataset.id;
+
+  // ── Duyệt / Từ chối đề xuất AI chiến lược (ai-suggestions page) ──
+  if (action === 'approve' || action === 'reject' || action === 'deny') {
+    const isApprove = action === 'approve';
+    const status = isApprove ? 'approved' : 'declined';
+    // Cập nhật MOCK ngay (optimistic)
+    if (typeof MOCK !== 'undefined' && Array.isArray(MOCK.suggestions)) {
+      const sug = MOCK.suggestions.find(s => String(s.id) === String(id));
+      if (sug) sug.status = isApprove ? 'approved' : 'rejected';
+    }
+    showToast(isApprove ? '✅ Đã duyệt đề xuất AI!' : '❌ Đã từ chối đề xuất', isApprove ? 'success' : 'warning');
+    // Gọi backend
+    sendApprovalToBackend(id || 'unknown', status).catch(() => {});
+    // Re-render trang
+    setTimeout(() => navigate('ai-suggestions'), 300);
+    return;
+  }
+
+  // ── Duyệt tin nhắn chat (inbox / pending messages) ──
+  if (action === 'chat-approve' || action === 'chat-reject') {
+    const convId = btn.dataset.convId || id;
+    const editedText = btn.dataset.editedText || '';
+    if (typeof MOCK !== 'undefined' && Array.isArray(MOCK.conversations)) {
+      const conv = MOCK.conversations.find(c => String(c.id || c.name) === String(convId));
+      if (conv) conv.status = action === 'chat-approve' ? 'auto' : 'escalate';
+    }
+    showToast(action === 'chat-approve' ? '✅ Đã gửi tin nhắn!' : '🔄 Đã chuyển cho agent khác', action === 'chat-approve' ? 'success' : 'info');
+    // Ghi log vào backend (fire-and-forget)
+    if (editedText) {
+      apiCall('/learn-feedback', 'POST', { customer_q: convId, human_a: editedText }).catch(() => {});
+    }
+    return;
+  }
+
+  // ── Gửi tin nhắn đã chỉnh sửa từ inbox ──
+  if (action === 'chat-send-msg') {
+    const inputEl = document.getElementById('chatReplyInput') || document.querySelector('.chat-reply-input');
+    const msgText = inputEl ? inputEl.value.trim() : '';
+    if (!msgText) { showToast('⚠️ Vui lòng nhập tin nhắn', 'warning'); return; }
+    showToast('✅ Đã gửi tin nhắn tới khách!', 'success');
+    if (inputEl) inputEl.value = '';
+    return;
+  }
+});
+
+/* ──────────────────────────────────────────────────────────────────────
+   14. INIT
    ────────────────────────────────────────────────────────────────────── */
 
 document.addEventListener('DOMContentLoaded', function () {

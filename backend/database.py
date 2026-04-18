@@ -91,6 +91,32 @@ def save_message(db, customer_id: str, role: str, content: str):
     db.add(new_msg)
     db.commit()
 
+# Bảng lưu trữ đề xuất content đã được xác nhận / đang theo dõi
+class ContentSuggestion(Base):
+    __tablename__ = "content_suggestions"
+    id               = Column(Integer, primary_key=True, index=True)
+    suggestion_id    = Column(String, index=True, unique=True)          # vd: cs-001, task-3
+    title            = Column(Text)
+    type             = Column(String)                                   # video | blog_faq | comparison | guide
+    platform         = Column(String)
+    priority         = Column(String, default="medium")                 # high | medium
+    status           = Column(String, default="pending")               # pending | saved | scheduled | ignored
+    combined_score   = Column(Integer, default=0)
+    chatbot_count    = Column(Integer, default=0)
+    chatbot_topic    = Column(String)
+    review_count     = Column(Integer, default=0)
+    review_neg_pct   = Column(Integer, default=0)
+    sample_questions = Column(Text)                                     # JSON list
+    sample_reviews   = Column(Text)                                     # JSON list
+    angle            = Column(Text)
+    estimated_impact = Column(String)
+    estimated_production = Column(String)
+    source           = Column(String)                                   # content_task | mock_cluster | daily_summary
+    source_product_id = Column(String)
+    created_at       = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at       = Column(DateTime, default=datetime.datetime.utcnow)
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     # Tự động thêm cột is_archived nếu DB cũ đang chạy để tránh lỗi

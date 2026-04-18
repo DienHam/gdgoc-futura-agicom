@@ -21,7 +21,7 @@ from services import (
     cskh_rag_service,
     chat_with_history_service
 )
-from database import SessionLocal, ChatLog, CoordinationTask, ChatMessage as DB_ChatMessage, save_message, init_db, DailySummaryArchive, ReviewLog
+from database import SessionLocal, ChatLog, CoordinationTask, ChatMessage as DB_ChatMessage, save_message, init_db, DailySummaryArchive, ReviewLog, ContentSuggestion
 
 init_db()
 
@@ -576,6 +576,207 @@ async def delete_chat_history(customer_id: str):
         return {"status": "error", "detail": str(e)}
     finally:
         db.close()
+
+@app.get("/api/content-suggestions")
+async def get_content_suggestions():
+    """
+    Tổng hợp tín hiệu content từ CoordinationTask + ChatLog + ReviewLog.
+    Trả về danh sách đề xuất có cấu trúc để frontend hiển thị và merge với MOCK.
+    """
+    db = SessionLocal()
+    try:
+        # 1. Lấy ContentSuggestion đã lưu/lên lịch (chưa bị ignored)
+        saved_sugs = db.query(ContentSuggestion).filter(
+            ContentSuggestion.status != "ignored"
+        ).order_by(ContentSuggestion.combined_score.desc()).all()
+
+        # 2. Lấy content tasks đang pending
+        content_tasks = db.query(CoordinationTask).filter(
+            CoordinationTask.target_agent == "Content",
+            CoordinationTask.status == "pending"
+        ).order_by(CoordinationTask.id.desc()).all()
+
+        # 3. Tín hiệu từ reviews tiêu cực (group by product)
+        neg_reviews = db.query(ReviewLog).filter(
+            ReviewLog.rating <= 3
+        ).order_by(ReviewLog.timestamp.desc()).limit(30).all()
+
+        # 4. Tín hiệu từ chat logs gần đây
+        recent_insights = db.query(ChatLog).filter(
+            ChatLog.is_archived == False,
+            ChatLog.insight.isnot(None)
+        ).order_by(ChatLog.timestamp.desc()).limit(20).all()
+
+        suggestions = []
+
+        # -- Từ ContentSuggestion đã lưu trong DB --
+        saved_suggestion_ids = set()
+        for s in saved_sugs:
+            saved_suggestion_ids.add(s.suggestion_id)
+            sq = []
+            sr = []
+            try:
+                sq = json.loads(s.sample_questions or "[]")
+            except Exception:
+                pass
+            try:
+                sr = json.loads(s.sample_reviews or "[]")
+            except Exception:
+                pass
+            suggestions.append({
+                "id": s.suggestion_id,
+                "db_id": s.id,
+                "title": s.title,
+                "type": s.type or "guide",
+                "platform": s.platform or "Blog + Website",
+                "priority": s.priority or "medium",
+                "status": s.status,
+                "combined_score": s.combined_score or 70,
+                "chatbot_signal": {
+                    "count": s.chatbot_count or 0,
+                    "topic": s.chatbot_topic or "Từ backend",
+                    "sample_questions": sq
+                },
+                "review_signal": {
+                    "count": s.review_count or 0,
+                    "neg_pct": s.review_neg_pct or 0,
+                    "sample_reviews": sr
+                },
+                "angle": s.angle or "",
+                "estimated_impact": s.estimated_impact or "Cải thiện trải nghiệm khách hàng",
+                "estimated_production": s.estimated_production or "1-2 ngày",
+                "_fromBackend": True,
+                "_source": s.source or "db"
+            })
+
+        # -- Từ CoordinationTask target_agent=Content (chưa có trong DB) --
+        def _detect_type(text):
+            t = (text or "").lower()
+            if any(k in t for k in ["video", "quay", "tiktok", "youtube"]):
+                return "video"
+            if any(k in t for k in ["so sánh", " vs ", "compare"]):
+                return "comparison"
+            if any(k in t for k in ["faq", "blog", "hướng dẫn", "câu hỏi", "giải đáp"]):
+                return "blog_faq"
+            return "guide"
+
+        def _platform_for(t):
+            return {
+                "video": "TikTok + YouTube",
+                "blog_faq": "Blog + Website",
+                "comparison": "Blog + YouTube",
+                "guide": "Website + Shopee"
+            }.get(t, "Đa nền tảng")
+
+        neg_by_product = {}
+        for r in neg_reviews:
+            pid = r.product_id or "unknown"
+            neg_by_product.setdefault(pid, []).append(r)
+
+        for task in content_tasks:
+            task_sug_id = f"task-{task.id}"
+            if task_sug_id in saved_suggestion_ids:
+                continue  # đã có trong DB rồi
+
+            related_neg = neg_by_product.get(task.product_id or "", [])
+            sug_type = _detect_type(task.instruction)
+            score = min(99, 65 + len(related_neg) * 8 + (10 if related_neg else 0))
+
+            suggestions.append({
+                "id": task_sug_id,
+                "title": (task.instruction or "")[:100],
+                "type": sug_type,
+                "platform": _platform_for(sug_type),
+                "priority": "high" if len(related_neg) >= 1 or score >= 80 else "medium",
+                "status": "pending",
+                "combined_score": score,
+                "chatbot_signal": {
+                    "count": len(recent_insights),
+                    "topic": "Phát hiện từ báo cáo hàng ngày",
+                    "sample_questions": [log.customer_q[:60] for log in recent_insights[:2]]
+                },
+                "review_signal": {
+                    "count": len(related_neg),
+                    "neg_pct": 100 if related_neg else 0,
+                    "sample_reviews": [(r.review_text or "")[:60] for r in related_neg[:2]]
+                },
+                "angle": task.instruction or "",
+                "estimated_impact": f"Giảm câu hỏi lặp lại ~30–50%",
+                "estimated_production": {"video": "1-2 ngày", "blog_faq": "2-4 giờ", "comparison": "1 ngày", "guide": "3-5 giờ"}.get(sug_type, "1-2 ngày"),
+                "_fromBackend": True,
+                "_source": "content_task"
+            })
+
+        # Sắp xếp: đã lưu/lên lịch lên đầu, rồi theo score
+        suggestions.sort(key=lambda x: (0 if x["status"] in ("saved", "scheduled") else 1, -x["combined_score"]))
+
+        return {
+            "total": len(suggestions),
+            "suggestions": suggestions,
+            "meta": {
+                "neg_review_count": len(neg_reviews),
+                "content_tasks_count": len(content_tasks),
+                "chat_signals_count": len(recent_insights),
+                "saved_in_db": len(saved_sugs)
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
+@app.patch("/api/content-suggestions/{suggestion_id}/status")
+async def update_content_suggestion_status(suggestion_id: str, body: dict):
+    """
+    Cập nhật trạng thái đề xuất content: pending | saved | scheduled | ignored.
+    Tự động tạo mới bản ghi nếu chưa có trong DB.
+    """
+    new_status = body.get("status")
+    if new_status not in ("pending", "saved", "scheduled", "ignored"):
+        raise HTTPException(status_code=400, detail="status không hợp lệ")
+
+    db = SessionLocal()
+    try:
+        sug = db.query(ContentSuggestion).filter(
+            ContentSuggestion.suggestion_id == suggestion_id
+        ).first()
+
+        if sug:
+            sug.status = new_status
+            sug.updated_at = datetime.utcnow()
+        else:
+            # Tạo bản ghi tối giản để lưu trạng thái
+            title = body.get("title", suggestion_id)
+            sug = ContentSuggestion(
+                suggestion_id=suggestion_id,
+                title=title[:200] if title else suggestion_id,
+                type=body.get("type", "guide"),
+                platform=body.get("platform", ""),
+                priority=body.get("priority", "medium"),
+                status=new_status,
+                combined_score=int(body.get("combined_score", 0)),
+                chatbot_count=int(body.get("chatbot_count", 0)),
+                chatbot_topic=body.get("chatbot_topic", ""),
+                review_count=int(body.get("review_count", 0)),
+                review_neg_pct=int(body.get("review_neg_pct", 0)),
+                sample_questions=json.dumps(body.get("sample_questions", []), ensure_ascii=False),
+                sample_reviews=json.dumps(body.get("sample_reviews", []), ensure_ascii=False),
+                angle=body.get("angle", ""),
+                estimated_impact=body.get("estimated_impact", ""),
+                estimated_production=body.get("estimated_production", ""),
+                source=body.get("source", "frontend")
+            )
+            db.add(sug)
+
+        db.commit()
+        return {"status": "success", "suggestion_id": suggestion_id, "new_status": new_status}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
 
 @app.post("/system/reset-all")
 async def reset_all_data():

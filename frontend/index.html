@@ -402,11 +402,10 @@
     </div>
 
     <script src="app4.js"></script>
+    <!-- config.js phải load TRƯỚC api_integration.js để set window.AGICOM_API_BASE -->
+    <script src="config.js"></script>
     <script src="api_integration.js"></script>
 
 <!-- sidebar logic handled by app4.js -->
+<!-- Backend URL config: config.js (đổi URL Render ở đây) -->
 <!-- API integration (real backend calls) handled by api_integration.js -->
-
-</body>
-
-</html>

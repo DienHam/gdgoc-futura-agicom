@@ -2351,16 +2351,21 @@ function renderContentSuggestions() {
       + '<div style="font-size:0.58rem;color:' + c + ';">score</div></div>';
   }
 
+  const scheduled = sugs.filter(function(s) { return s.status === 'scheduled'; });
+  const ignored   = sugs.filter(function(s) { return s.status === 'ignored'; });
+  const visible   = sugs.filter(function(s) { return s.status !== 'ignored'; });
+
   // ---- SUMMARY HEADER ----
   let html = '<div class="content-card" style="margin-bottom:20px;">'
     + '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">'
     + '<div><div class="content-card-title" style="margin-bottom:4px;">✍️ Đề xuất Content — AI phân tích đa nguồn</div>'
-    + '<div style="font-size:0.8rem;color:var(--text-muted);">Phân tích ' + clusters.reduce((s,c) => s+c.count,0) + ' câu hỏi chatbot + ' + MOCK.reviews.length + ' reviews → đề xuất ' + pending.length + ' nội dung cần tạo gấp</div>'
+    + '<div style="font-size:0.8rem;color:var(--text-muted);">Phân tích ' + clusters.reduce(function(s,c){return s+c.count;},0) + ' câu hỏi chatbot + ' + MOCK.reviews.length + ' reviews → ' + pending.length + ' nội dung cần tạo gấp</div>'
     + '</div>'
-    + '<div style="display:flex;gap:12px;">'
-    + '<div style="text-align:center;padding:10px 16px;background:#fef2f2;border-radius:8px;"><div style="font-size:1.4rem;font-weight:800;color:#ef4444;">' + pending.length + '</div><div style="font-size:0.7rem;color:#ef4444;">Chờ tạo</div></div>'
-    + '<div style="text-align:center;padding:10px 16px;background:#fffbeb;border-radius:8px;"><div style="font-size:1.4rem;font-weight:800;color:#f59e0b;">' + saved.length + '</div><div style="font-size:0.7rem;color:#f59e0b;">Đã lưu</div></div>'
-    + '<div style="text-align:center;padding:10px 16px;background:#f0fdf4;border-radius:8px;"><div style="font-size:1.4rem;font-weight:800;color:#10b981;">' + inv.length + '</div><div style="font-size:0.7rem;color:#10b981;">Đã có</div></div>'
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;">'
+    + '<div style="text-align:center;padding:10px 14px;background:#fef2f2;border-radius:8px;"><div style="font-size:1.4rem;font-weight:800;color:#ef4444;">' + pending.length + '</div><div style="font-size:0.68rem;color:#ef4444;">Chờ tạo</div></div>'
+    + '<div style="text-align:center;padding:10px 14px;background:#fffbeb;border-radius:8px;"><div style="font-size:1.4rem;font-weight:800;color:#f59e0b;">' + saved.length + '</div><div style="font-size:0.68rem;color:#f59e0b;">Đã lưu</div></div>'
+    + '<div style="text-align:center;padding:10px 14px;background:#f0fdf4;border-radius:8px;"><div style="font-size:1.4rem;font-weight:800;color:#10b981;">' + scheduled.length + '</div><div style="font-size:0.68rem;color:#10b981;">Đã lên lịch</div></div>'
+    + '<div style="text-align:center;padding:10px 14px;background:#f0f9ff;border-radius:8px;"><div style="font-size:1.4rem;font-weight:800;color:#0ea5e9;">' + inv.length + '</div><div style="font-size:0.68rem;color:#0ea5e9;">Đã xuất bản</div></div>'
     + '</div></div></div>';
 
   // ---- SECTION 1: Content Gap Analyzer ----
@@ -2377,18 +2382,37 @@ function renderContentSuggestions() {
     + '<th style="text-align:center;padding:8px;font-weight:700;color:var(--text-muted);">Hành động</th>'
     + '</tr></thead><tbody>';
 
-  const gapData = [
-    { topic: 'Thời lượng pin S24 Ultra', chatbot: 23, review: 23, neg: 74, has_content: false, content_gap: 'Không có video/blog test pin' },
-    { topic: 'Hàng auth & Tem chính hãng', chatbot: 17, review: 12, neg: 5, has_content: false, content_gap: 'Chưa có video unbox chuyên biệt' },
-    { topic: 'Giá sỉ từ 5 sản phẩm', chatbot: 12, review: 0, neg: 0, has_content: false, content_gap: 'Không có bảng giá B2B' },
-    { topic: 'AirPods với Android', chatbot: 12, review: 6, neg: 83, has_content: false, content_gap: 'Chưa có FAQ/guide riêng' },
-    { topic: 'Hướng dẫn sạc AirPods', chatbot: 8, review: 5, neg: 20, has_content: true, content_type: 'Blog (01/03)', questions_reduced: 31 },
-    { topic: 'Bảo hành Samsung Galaxy', chatbot: 7, review: 4, neg: 15, has_content: true, content_type: 'FAQ (10/01)', questions_reduced: 22 },
-    { topic: 'So sánh S24 vs iPhone', chatbot: 9, review: 4, neg: 10, has_content: false, content_gap: 'Chưa có article so sánh' }
-  ];
+  // Xây gap analysis từ MOCK.chat_clusters + reviews + inventory (động)
+  var gapData = (MOCK.chat_clusters || []).map(function(cl) {
+    var kw0 = cl.label.toLowerCase().split(' ')[0];
+    var negRevs = (MOCK.reviews || []).filter(function(r) {
+      return r.rating <= 3 && ((r.text || '').toLowerCase().includes(kw0) ||
+        (r.product_id || '').toLowerCase().includes(kw0));
+    });
+    var matchedInv = inv.find(function(c) {
+      return c.topic && c.topic.toLowerCase().split('/').some(function(t) {
+        return cl.label.toLowerCase().includes(t.trim()) || t.trim().includes(kw0);
+      });
+    });
+    return {
+      topic: cl.label,
+      chatbot: cl.count,
+      review: negRevs.length > 0 ? negRevs.length * 3 : 0,
+      neg: negRevs.length > 0 ? Math.min(95, 40 + negRevs.length * 15) : (cl.urgent ? 35 : 8),
+      has_content: !!matchedInv,
+      content_type: matchedInv ? ((matchedInv.type === 'video' ? 'Video' : 'Blog') + ' (' + (matchedInv.published || '') + ')') : null,
+      questions_reduced: matchedInv ? matchedInv.questions_reduced : null,
+      content_gap: 'Cần: ' + (cl.action || 'tạo content')
+    };
+  });
 
   gapData.forEach(function(row) {
-    const sentColor = row.neg > 50 ? '#ef4444' : row.neg > 20 ? '#f59e0b' : '#10b981';
+    var sentColor = row.neg > 50 ? '#ef4444' : row.neg > 20 ? '#f59e0b' : '#10b981';
+    // Tìm suggestion khớp để liên kết nút "Tạo ngay"
+    var kw = row.topic.toLowerCase().split(' ')[0];
+    var matchSug = (MOCK.content_suggestions_generated || []).find(function(s) {
+      return s.status !== 'ignored' && (s.title || '').toLowerCase().includes(kw);
+    });
     html += '<tr style="border-bottom:1px solid var(--border-primary);">';
     html += '<td style="padding:10px 12px;font-weight:600;">' + row.topic + '</td>';
     html += '<td style="text-align:center;padding:10px;"><span style="background:#eef2ff;color:#6366f1;font-weight:700;padding:3px 8px;border-radius:6px;">' + row.chatbot + '</span></td>';
@@ -2396,10 +2420,16 @@ function renderContentSuggestions() {
     html += '<td style="text-align:center;padding:10px;"><span style="color:' + sentColor + ';font-size:0.75rem;font-weight:700;">' + row.neg + '% lo ngại</span></td>';
     if (row.has_content) {
       html += '<td style="padding:10px 12px;"><span style="background:#f0fdf4;color:#10b981;font-size:0.72rem;font-weight:700;padding:3px 8px;border-radius:6px;">✅ ' + row.content_type + '</span><div style="font-size:0.68rem;color:var(--text-muted);margin-top:2px;">Giảm ' + row.questions_reduced + '% câu hỏi</div></td>';
-      html += '<td style="text-align:center;padding:10px;"><span style="font-size:0.72rem;color:#10b981;">Đang hoạt động</span></td>';
-    } else {
+      html += '<td style="text-align:center;padding:10px;"><span style="font-size:0.72rem;color:#10b981;">✅ Đang hoạt động</span></td>';
+    } else if (matchSug && matchSug.status === 'scheduled') {
       html += '<td style="padding:10px 12px;"><span style="background:#fef2f2;color:#ef4444;font-size:0.72rem;font-weight:700;padding:3px 8px;border-radius:6px;">❌ Thiếu</span><div style="font-size:0.68rem;color:var(--text-muted);margin-top:2px;">' + row.content_gap + '</div></td>';
-      html += '<td style="text-align:center;padding:10px;"><button class="alert-cta" onclick="showToast(\'Đã thêm vào kế hoạch content\', \'success\')">Tạo ngay</button></td>';
+      html += '<td style="text-align:center;padding:10px;"><span style="font-size:0.72rem;color:#10b981;font-weight:700;">🗓 Đã lên lịch</span></td>';
+    } else {
+      var onclickFn = matchSug
+        ? 'scheduleSuggestion(\'' + matchSug.id.replace(/'/g,"\\'") + '\')'
+        : 'showToast(\'Tạo đề xuất AI trước để lên lịch\', \'info\')';
+      html += '<td style="padding:10px 12px;"><span style="background:#fef2f2;color:#ef4444;font-size:0.72rem;font-weight:700;padding:3px 8px;border-radius:6px;">❌ Thiếu</span><div style="font-size:0.68rem;color:var(--text-muted);margin-top:2px;">' + row.content_gap + '</div></td>';
+      html += '<td style="text-align:center;padding:10px;"><button class="alert-cta" onclick="' + onclickFn + '">Lên lịch</button></td>';
     }
     html += '</tr>';
   });
@@ -2408,73 +2438,95 @@ function renderContentSuggestions() {
   // ---- SECTION 2: AI Content Recommendations ----
   html += '<div style="margin-bottom:8px;font-size:0.82rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;">🤖 Đề xuất AI — Ưu tiên theo Combined Signal Score</div>';
 
-  sugs.forEach(function(sug) {
-    const tLabel = typeLabel[sug.type] || sug.type;
-    const tColor = typeColor[sug.type] || '#94a3b8';
-    const tBg = typeBg[sug.type] || '#f8fafc';
-    const isHigh = sug.priority === 'high';
+  visible.forEach(function(sug) {
+    var tLabel = typeLabel[sug.type] || sug.type;
+    var tColor = typeColor[sug.type] || '#94a3b8';
+    var tBg = typeBg[sug.type] || '#f8fafc';
+    var isHigh = sug.priority === 'high';
+    var sid = (sug.id || '').replace(/'/g, "\\'");
 
-    html += '<div style="background:var(--bg-primary);border:1px solid ' + (isHigh ? '#fca5a5' : 'var(--border-primary)') + ';border-radius:12px;padding:16px;margin-bottom:14px;">';
+    // Border theo trạng thái
+    var borderColor = sug.status === 'scheduled' ? '#10b981'
+                    : sug.status === 'saved' ? '#f59e0b'
+                    : isHigh ? '#fca5a5' : 'var(--border-primary)';
+
+    html += '<div style="background:var(--bg-primary);border:1px solid ' + borderColor + ';border-radius:12px;padding:16px;margin-bottom:14px;">';
     html += '<div style="display:flex;align-items:flex-start;gap:14px;">';
     html += scoreRing(sug.combined_score);
     html += '<div style="flex:1;">';
-    // Title + type badge
+    // Title + badges
     html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">';
     html += '<strong style="font-size:0.9rem;">' + sug.title + '</strong>';
     html += '<span style="background:' + tBg + ';color:' + tColor + ';font-size:0.68rem;font-weight:700;padding:2px 8px;border-radius:10px;">' + tLabel + '</span>';
     html += '<span style="background:#f1f5f9;color:#64748b;font-size:0.68rem;padding:2px 8px;border-radius:10px;">' + sug.platform + '</span>';
-    if (sug.status === 'saved') html += '<span style="background:#fffbeb;color:#f59e0b;font-size:0.68rem;font-weight:700;padding:2px 8px;border-radius:10px;">📌 Đã lưu</span>';
+    if (sug.status === 'saved')      html += '<span style="background:#fffbeb;color:#f59e0b;font-size:0.68rem;font-weight:700;padding:2px 8px;border-radius:10px;">📌 Đã lưu</span>';
+    if (sug.status === 'scheduled')  html += '<span style="background:#f0fdf4;color:#10b981;font-size:0.68rem;font-weight:700;padding:2px 8px;border-radius:10px;">🗓 Đã lên lịch</span>';
+    if (sug._fromBackend)            html += '<span style="background:#dcfce7;color:#16a34a;font-size:0.62rem;padding:2px 6px;border-radius:8px;">↓ Backend</span>';
     html += '</div>';
     // Two signals
     html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">';
+    // Chatbot signal
     html += '<div style="background:#eef2ff;border-radius:8px;padding:10px;">';
     html += '<div style="font-size:0.7rem;font-weight:700;color:#6366f1;margin-bottom:4px;">💬 Tín hiệu Chatbot</div>';
-    html += '<div style="font-size:0.78rem;font-weight:700;color:var(--text-primary);">' + sug.chatbot_signal.count + ' câu hỏi</div>';
-    html += '<div style="font-size:0.72rem;color:var(--text-muted);">' + sug.chatbot_signal.topic + '</div>';
-    html += '<div style="margin-top:6px;">' + sug.chatbot_signal.sample_questions.slice(0,2).map(function(q) {
+    html += '<div style="font-size:0.78rem;font-weight:700;color:var(--text-primary);">' + (sug.chatbot_signal.count || 0) + ' câu hỏi</div>';
+    html += '<div style="font-size:0.72rem;color:var(--text-muted);">' + (sug.chatbot_signal.topic || '') + '</div>';
+    html += '<div style="margin-top:6px;">' + (sug.chatbot_signal.sample_questions || []).slice(0,2).map(function(q) {
       return '<div style="font-size:0.68rem;color:#6366f1;padding:2px 0;">› "' + q + '"</div>';
     }).join('') + '</div>';
     html += '</div>';
-    if (sug.review_signal.count > 0) {
+    // Review signal
+    if ((sug.review_signal.count || 0) > 0) {
       html += '<div style="background:#f0fdf4;border-radius:8px;padding:10px;">';
       html += '<div style="font-size:0.7rem;font-weight:700;color:#10b981;margin-bottom:4px;">⭐ Tín hiệu Review</div>';
       html += '<div style="font-size:0.78rem;font-weight:700;color:var(--text-primary);">' + sug.review_signal.count + ' đánh giá</div>';
-      html += '<div style="font-size:0.72rem;color:var(--text-muted);">' + sug.review_signal.neg_pct + '% lo ngại về chủ đề này</div>';
-      html += '<div style="margin-top:6px;">' + sug.review_signal.sample_reviews.slice(0,2).map(function(r) {
+      html += '<div style="font-size:0.72rem;color:var(--text-muted);">' + (sug.review_signal.neg_pct || 0) + '% lo ngại về chủ đề này</div>';
+      html += '<div style="margin-top:6px;">' + (sug.review_signal.sample_reviews || []).slice(0,2).map(function(r) {
         return '<div style="font-size:0.68rem;color:#10b981;padding:2px 0;">› "' + r + '"</div>';
       }).join('') + '</div>';
       html += '</div>';
     } else {
       html += '<div style="background:#f0f9ff;border-radius:8px;padding:10px;">';
       html += '<div style="font-size:0.7rem;font-weight:700;color:#0ea5e9;margin-bottom:4px;">💼 Tín hiệu Thị trường</div>';
-      html += '<div style="font-size:0.78rem;color:var(--text-muted);">Cơ hội B2B — xu hướng tăng 45%</div>';
-      html += '<div style="font-size:0.72rem;color:#0ea5e9;margin-top:4px;">› Đối thủ Hoàng Hà đã có bảng giá sỉ</div>';
+      html += '<div style="font-size:0.78rem;color:var(--text-muted);">Chưa có review — tín hiệu từ chatbot</div>';
+      html += '<div style="font-size:0.72rem;color:#0ea5e9;margin-top:4px;">› Cơ hội chiếm lĩnh content trước</div>';
       html += '</div>';
     }
     html += '</div>';
-    // Angle/approach
+    // Angle
     html += '<div style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:10px;">';
     html += '<div style="font-size:0.72rem;font-weight:700;color:var(--text-muted);margin-bottom:3px;">🎯 Góc tiếp cận đề xuất:</div>';
-    html += '<div style="font-size:0.78rem;color:var(--text-secondary);">' + sug.angle + '</div>';
+    html += '<div style="font-size:0.78rem;color:var(--text-secondary);">' + (sug.angle || '—') + '</div>';
     html += '</div>';
-    // Impact + production
+    // Impact + action buttons
     html += '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">';
-    html += '<div style="display:flex;gap:12px;">';
-    html += '<div style="font-size:0.72rem;color:#10b981;"><strong>📈 Impact:</strong> ' + sug.estimated_impact + '</div>';
-    html += '<div style="font-size:0.72rem;color:var(--text-muted);"><strong>⏱ Sản xuất:</strong> ' + sug.estimated_production + '</div>';
+    html += '<div style="display:flex;gap:12px;flex-wrap:wrap;">';
+    html += '<div style="font-size:0.72rem;color:#10b981;"><strong>📈 Impact:</strong> ' + (sug.estimated_impact || '') + '</div>';
+    html += '<div style="font-size:0.72rem;color:var(--text-muted);"><strong>⏱ Sản xuất:</strong> ' + (sug.estimated_production || '') + '</div>';
     html += '</div>';
-    // Action buttons
     html += '<div style="display:flex;gap:8px;">';
-    if (sug.status === 'pending') {
-      html += '<button class="alert-cta" style="background:var(--accent-emerald-bg);color:var(--accent-emerald);border:1px solid var(--accent-emerald);" onclick="showToast(\'Đã lên lịch tạo content!\', \'success\')">✅ Lên lịch</button>';
-      html += '<button class="alert-cta" style="background:#fffbeb;color:#f59e0b;border:1px solid #f59e0b;" onclick="showToast(\'Đã lưu vào danh sách\', \'info\')">📌 Lưu lại</button>';
-      html += '<button class="alert-cta" style="background:var(--accent-rose-bg);color:var(--accent-rose);border:1px solid var(--accent-rose);" onclick="showToast(\'Đã bỏ qua đề xuất\', \'warning\')">✕ Bỏ qua</button>';
+    if (sug.status === 'scheduled') {
+      html += '<button class="alert-cta" style="background:#f0fdf4;color:#10b981;border:1px solid #10b981;" onclick="restoreSuggestion(\'' + sid + '\')">↩ Chuyển lại Pending</button>';
+    } else if (sug.status === 'saved') {
+      html += '<button class="alert-cta" style="background:var(--accent-emerald-bg);color:var(--accent-emerald);border:1px solid var(--accent-emerald);" onclick="scheduleSuggestion(\'' + sid + '\')">🗓 Lên lịch</button>';
+      html += '<button class="alert-cta" style="background:var(--accent-rose-bg);color:var(--accent-rose);border:1px solid var(--accent-rose);" onclick="ignoreSuggestion(\'' + sid + '\')">✕ Bỏ qua</button>';
     } else {
-      html += '<button class="alert-cta" onclick="showToast(\'Đã bắt đầu tạo content!\', \'success\')">▶ Tạo ngay</button>';
+      // pending
+      html += '<button class="alert-cta" style="background:var(--accent-emerald-bg);color:var(--accent-emerald);border:1px solid var(--accent-emerald);" onclick="scheduleSuggestion(\'' + sid + '\')">✅ Lên lịch</button>';
+      html += '<button class="alert-cta" style="background:#fffbeb;color:#f59e0b;border:1px solid #f59e0b;" onclick="saveSuggestion(\'' + sid + '\')">📌 Lưu lại</button>';
+      html += '<button class="alert-cta" style="background:var(--accent-rose-bg);color:var(--accent-rose);border:1px solid var(--accent-rose);" onclick="ignoreSuggestion(\'' + sid + '\')">✕ Bỏ qua</button>';
     }
     html += '</div></div>';
     html += '</div></div></div>';
   });
+
+  // Hiện số lượng đã bỏ qua (nếu có) + nút khôi phục
+  if (ignored.length > 0) {
+    html += '<div style="text-align:center;margin-bottom:16px;">'
+      + '<span style="font-size:0.75rem;color:var(--text-muted);">' + ignored.length + ' đề xuất đã ẩn </span>'
+      + '<button onclick="(function(){MOCK.content_suggestions_generated.forEach(function(s){if(s.status===\'ignored\')s.status=\'pending\';});navigate(\'content-suggestions\');})()" '
+      + 'style="font-size:0.73rem;color:var(--accent-indigo);background:none;border:none;cursor:pointer;text-decoration:underline;">Hiện lại tất cả</button>'
+      + '</div>';
+  }
 
   // ---- SECTION 3: Content Performance + Calendar ----
   html += '<div class="grid-2" style="gap:16px;margin-bottom:20px;">';
@@ -2495,22 +2547,41 @@ function renderContentSuggestions() {
   html += '<div style="margin-top:12px;padding:10px;background:#f0fdf4;border-radius:8px;font-size:0.75rem;color:#065f46;">💡 TB mỗi content giảm <strong>33% câu hỏi chatbot</strong> trong chủ đề tương ứng</div>';
   html += '</div>';
 
-  // Content calendar
+  // Content calendar — xây từ pending/saved/scheduled suggestions
   html += '<div class="content-card" style="margin-bottom:0;">';
   html += '<div class="content-card-title" style="font-size:0.88rem;">🗓 Lịch Content đề xuất</div>';
-  const calItems = [
-    { week: 'Tuần này', items: ['Video test pin S24 Ultra (TikTok)', 'FAQ AirPods + Android (Blog)'], color: '#ef4444', bg: '#fef2f2' },
-    { week: '2 tuần tới', items: ['So sánh S24 vs iPhone 15 PM', 'Video unbox + kiểm tra auth'], color: '#f59e0b', bg: '#fffbeb' },
-    { week: 'Tháng tới', items: ['Landing page giá sỉ B2B', 'Hướng dẫn bảo hành chi tiết'], color: '#10b981', bg: '#f0fdf4' }
-  ];
+  var calHighPrio = sugs.filter(function(s){return s.status==='pending'&&s.priority==='high';}).slice(0,3);
+  var calMedPrio  = sugs.filter(function(s){return s.status==='pending'&&s.priority==='medium';}).slice(0,2);
+  var calSaved    = sugs.filter(function(s){return s.status==='saved';}).slice(0,2);
+  var calScheduled = sugs.filter(function(s){return s.status==='scheduled';}).slice(0,3);
+  var calItems = [
+    { week: 'Tuần này (ưu tiên cao 🔴)', sugs: calHighPrio, color: '#ef4444', bg: '#fef2f2',
+      fallback: '(Chưa có đề xuất cao — nhấn "Tạo từ báo cáo" để thêm)' },
+    { week: '2 tuần tới', sugs: calMedPrio, color: '#f59e0b', bg: '#fffbeb',
+      fallback: '(Chưa có đề xuất ưu tiên vừa)' },
+    { week: 'Đã lưu 📌', sugs: calSaved, color: '#f59e0b', bg: '#fffbeb',
+      fallback: calSaved.length===0 ? '(Chưa có item nào đã lưu)' : null },
+    { week: 'Đã lên lịch ✅', sugs: calScheduled, color: '#10b981', bg: '#f0fdf4',
+      fallback: calScheduled.length===0 ? '(Chưa lên lịch item nào)' : null }
+  ].filter(function(c){ return !(c.sugs.length===0 && !c.fallback); });
   calItems.forEach(function(cal) {
     html += '<div style="margin-bottom:12px;">';
     html += '<div style="font-size:0.72rem;font-weight:700;background:' + cal.bg + ';color:' + cal.color + ';padding:4px 10px;border-radius:6px;display:inline-block;margin-bottom:6px;">' + cal.week + '</div>';
-    cal.items.forEach(function(item) {
-      html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:0.78rem;">';
-      html += '<div style="width:6px;height:6px;border-radius:50%;background:' + cal.color + ';flex-shrink:0;"></div>';
-      html += '<span>' + item + '</span></div>';
-    });
+    if (cal.sugs.length === 0) {
+      html += '<div style="font-size:0.75rem;color:var(--text-muted);padding:4px 0;">' + cal.fallback + '</div>';
+    } else {
+      cal.sugs.forEach(function(s) {
+        var label = (s.title||'').length > 50 ? (s.title||'').substring(0,50) + '…' : (s.title||'');
+        var sid2 = (s.id||'').replace(/'/g,"\\'");
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:0.78rem;">';
+        html += '<div style="width:6px;height:6px;border-radius:50%;background:' + cal.color + ';flex-shrink:0;"></div>';
+        html += '<span style="flex:1;">' + label + '</span>';
+        if (s.status === 'pending' || s.status === 'saved') {
+          html += '<button onclick="scheduleSuggestion(\'' + sid2 + '\')" style="font-size:0.65rem;padding:2px 6px;border:1px solid #10b981;background:#f0fdf4;color:#10b981;border-radius:6px;cursor:pointer;white-space:nowrap;">🗓 Lên lịch</button>';
+        }
+        html += '</div>';
+      });
+    }
     html += '</div>';
   });
   html += '</div>';
