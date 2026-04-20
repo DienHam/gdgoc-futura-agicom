@@ -1,3 +1,5 @@
+# This is a collaboration project with a team of 4, where I largely contribute to Frontend, Backend and Hosting issues
+
 # 🚀 Agicom - E-commerce Management Agentic AI System
 
 **Project for GDGoC Hackathon 2026 - Team FUTURA**
